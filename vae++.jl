@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.14.1
+# v0.14.0
 
 using Markdown
 using InteractiveUtils
@@ -9,6 +9,9 @@ using Flux
 
 # ╔═╡ c70eaa72-90ad-11eb-3600-016807d53697
 using StatsFuns: log1pexp #log(1 + exp(x))
+
+# ╔═╡ 74171598-5b10-4449-aabb-49b1e168646b
+using BSON: @save
 
 # ╔═╡ 4a8432e4-5a71-4e2d-96be-3ee4061c42f6
 using BSON
@@ -188,7 +191,7 @@ Use the training data to learn the model and variational networks.
 function train!(enc, dec, data; nepochs=100)
 	params = Flux.params(enc, dec)
 	opt = ADAM()
-	
+	@info "Begin training in 2D latent space"
 	for epoch in 1:nepochs
 		b_loss = 0
 		for batch in data
@@ -203,28 +206,28 @@ function train!(enc, dec, data; nepochs=100)
 		# Optional: log loss using @info "Epoch $epoch: loss:..."
 		@info "Epoch $epoch: loss:$b_loss"
 		# Optional: visualize training progress with plot of loss
-		# Optional: save trained parameters to avoid retraining later
 	end
+	@info "Training in 2D is done"
 	# return nothing, this mutates the parameters of enc and dec!
 end
 
 # ╔═╡ c86a877c-90b9-11eb-31d8-bbcb71e4fa66
-# train!(encoder, decoder, batches, nepochs=10)
-
-# ╔═╡ 74171598-5b10-4449-aabb-49b1e168646b
-# using BSON: @save
+# train!(encoder, decoder, batches, nepochs=3)
 
 # ╔═╡ beec9c0c-d5cb-41fa-a5b6-7ba5da4afb68
-# @save "encoder.bson" encoder 
-
-# ╔═╡ 1c407b72-334e-45a9-8095-da6abff17b20
-# @save "decoder.bson" decoder 
+# begin
+# 	@save "encoder.bson" encoder 
+# 	@save "decoder.bson" decoder 
+# end
 
 # ╔═╡ bd5408bc-9998-4bf7-9752-5823f79354f8
-BSON.load("encoder.bson", @__MODULE__)
+begin
+	BSON.load("encoder.bson", @__MODULE__)
+	BSON.load("decoder.bson", @__MODULE__)
+end
 
-# ╔═╡ 7a17bdb1-28f3-4bc3-b28f-b5b71de39088
-BSON.load("decoder.bson", @__MODULE__)
+# ╔═╡ 0fbe4662-7777-4a23-a26c-c3f8968414b9
+q_μ, q_logσ = encoder(first(batches))
 
 # ╔═╡ 17c5ddda-90ba-11eb-1fce-93b8306264fb
 md"""
@@ -236,7 +239,7 @@ We will use a variatety of qualitative techniques to get a sense for our model b
 """
 
 # ╔═╡ 2029fc15-3ed9-4f99-b585-c93fdcdc66fb
-function calculate_bernoulli_mean(logit_mean)
+function calculate_bernoulli_mean(logit_means)
 	return exp.(logit_means) ./ (1 .+ exp.(logit_means))
 end
 
@@ -275,18 +278,12 @@ joint_log_density_3d(x,z) = log_prior(z) .+ log_likelihood_larger(x,z)
 
 # ╔═╡ 119a6e70-d698-489e-9605-1757b8429f57
 function elbo_3d(x)
-  #TODO variational parameters from data	
-  q_μ, q_logσ = encoder_3d(x)
-  #TODO: sample from variational distribution
-  z = sample_from_var_dist_3d(q_μ, q_logσ)
-  #TODO: joint likelihood of z and x under model
-  joint_ll = joint_log_density_3d(x,z)
-  #TODO: likelihood of z under variational distribution
-  log_q_z = log_q(z, q_μ, q_logσ)
-  #TODO: Scalar value, mean variational evidence lower bound over batch
-  elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
-  # return logσ for plotting
-  return elbo_estimate, q_logσ
+	q_μ, q_logσ = encoder_3d(x)
+  	z = sample_from_var_dist_3d(q_μ, q_logσ)
+  	joint_ll = joint_log_density_3d(x,z)
+  	log_q_z = log_q(z, q_μ, q_logσ)
+  	elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+	return elbo_estimate, q_logσ
 end
 
 # ╔═╡ 1f3e4948-b75a-4d78-875f-0f8586e49e82
@@ -328,6 +325,7 @@ function train_3d!(enc, dec, data; nepochs=100)
 		# Optional: visualize training progress with plot of loss
 		# Optional: save trained parameters to avoid retraining later
 	end
+	@info "Training in 3D is done"
 	# return nothing, this mutates the parameters of enc and dec!
 	# return logσs
 end
@@ -350,12 +348,73 @@ end
 # ╔═╡ b6a2b5d8-5258-4b75-8611-d25a4a075753
 q_μ_3d, q_logσ_3d = encoder_3d(first(batches))
 
+# ╔═╡ e2c07c18-43c8-4899-b083-05c8180dc7d3
+# Training set labels
+begin
+	train_labels = Flux.Data.MNIST.labels(:train)
+	label_batches = Flux.Data.DataLoader(train_labels, batchsize=BS)
+	labels = first(label_batches)
+end
+
 # ╔═╡ 78714227-094e-4a00-a72c-accfb50e1b71
-scatter(q_μ_3d[1,:], q_μ_3d[2,:], q_μ_3d[3,:], group=labels, title="A batch latent space of mean vectors for μ", xlabel="z1 for mean μ", ylabel="z2 for mean μ", zlabel="z3 for mean μ")
+scatter(q_μ_3d[1,:], q_μ_3d[2,:], q_μ_3d[3,:], group=labels, title="A batch 3D latent space of mean vectors for μ", xlabel="z1 for mean μ", ylabel="z2 for mean μ", zlabel="z3 for mean μ")
 
 # ╔═╡ 5ca39a1b-4871-4f48-9934-99c88fb504ba
 md"""
 ###### Comparison with baselines
+"""
+
+# ╔═╡ 79015407-a145-44ed-853d-ca7c89676ddc
+# Helper function for drawing the MNIST digit in 28*28 shape
+function draw_image(x)
+	dim = ndims(x)
+	if dim == 2
+		x_2d = reshape(x, 28, 28, :)
+		return Gray.(x_2d)
+	else
+		x_3d = reshape(x, 28, 28)
+		return Gray.(x_3d)
+	end
+end
+
+# ╔═╡ b7ae23ec-1612-40b9-8020-21d5ee5f4c48
+md"""
+Baseline (2D latent space)
+"""
+
+# ╔═╡ b10f4fa4-7fcb-4bc1-975a-55c8079a616a
+begin
+	# 1. Sample 10 2D z from the prior p(z)
+	zs = Any[]
+	for i in 1:10
+		sample_z = randn(2,)
+		push!(zs, sample_z)
+	end
+end
+
+# ╔═╡ e4b267fb-c2e9-4341-b261-860b12648127
+begin
+	# 2. decode each z to get logit-means
+	plots1, plots2, plots3 = Any[], Any[], Any[]
+	plots = Any[]
+	for i in 1:10
+		logit_means = decoder(zs[i])
+		# 3. Transfer logit-means to Bernoulli means μ
+		bern_mean = calculate_bernoulli_mean(logit_means)
+		push!(plots, draw_image(bern_mean))
+		# 5. Sample 3 examples from Bernoulli
+		samples1 = rand(Float64, size(bern_mean)) .< bern_mean
+		push!(plots1, draw_image(samples1))
+		samples2 = rand(Float64, size(bern_mean)) .< bern_mean
+		push!(plots2, draw_image(samples2))
+		samples3 = rand(Float64, size(bern_mean)) .< bern_mean
+		push!(plots3, draw_image(samples3))
+	end
+end
+
+# ╔═╡ 670121db-0989-4939-86e6-888194affb41
+md"""
+Model with larger dimension (3D latent space)
 """
 
 # ╔═╡ 92b6e763-522b-444e-9127-9ff51ef1239b
@@ -376,17 +435,13 @@ begin
 	for i in 1:10
 		logit_means_3d = decoder_3d(zs_3d[i])
 		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean_3d = exp.(logit_means_3d) ./ (1 .+ exp.(logit_means_3d))
-		
+		bern_mean_3d = calculate_bernoulli_mean(logit_means_3d)
 		push!(plots_3d, draw_image(bern_mean_3d))
-		
 		# 5. Sample 3 examples from Bernoulli 
 		samples1_3d = rand(Float64, size(bern_mean_3d)) .< bern_mean_3d
 		push!(plots1_3d, draw_image(samples1_3d))
-		
 		samples2_3d =  rand(Float64, size(bern_mean_3d)) .< bern_mean_3d
 		push!(plots2_3d, draw_image(samples2_3d))
-		
 		samples3_3d = rand(Float64, size(bern_mean_3d)) .< bern_mean_3d
 		push!(plots3_3d, draw_image(samples3_3d))
 	end
@@ -455,34 +510,139 @@ md"""
 ### Condition on MNIST Digit Supervision
 """
 
-# ╔═╡ 5926c5c0-c552-4802-8447-58e526e00659
-#decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata))
+# ╔═╡ 772f74d7-097b-40e6-a8c9-ee536dcffadc
+md"""
+Horizontally concate labels to data
+"""
 
 # ╔═╡ 2c8ae3f0-9e01-40b3-9cb0-0d651a048662
-# encoder_cond = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+encoder_cond = Chain(Dense(Ddata+1, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+
+# ╔═╡ 5926c5c0-c552-4802-8447-58e526e00659
+decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+1))
+
+# ╔═╡ b78c9a5c-d66e-4003-9573-2f8d2945c61a
+size(binarized_MNIST)
+
+# ╔═╡ debff640-513f-4b1c-bddf-0cbbe33b0522
+batches_cond = Flux.Data.DataLoader(cat(binarized_MNIST, reshape(train_labels, (1,60000)), dims=1), batchsize=BS)
+
+# ╔═╡ 2191de84-b685-4b25-816e-f38a6e12db3d
+function log_likelihood_cond(x,z)
+  """ Compute log likelihood log_p(x|z)"""
+	# use numerically stable bernoulli
+	return sum(bernoulli_log_density(x, decoder_cond(z)),dims=1)
+end
+
+# ╔═╡ 85186d7a-2f4b-4766-8bcf-8edb415af4f8
+joint_log_density_cond(x,z) = log_prior(z) .+ log_likelihood_cond(x,z)
+
+# ╔═╡ 296bea20-2efa-4a1f-bc14-7d3a61e45bd2
+function elbo_3d_cond(x)	
+	q_μ, q_logσ = encoder_cond(x)
+  	z = sample_from_var_dist_3d(q_μ, q_logσ)
+  	joint_ll = joint_log_density_cond(x,z)
+  	log_q_z = log_q(z, q_μ, q_logσ)
+  	elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+  	return elbo_estimate
+end
+
+# ╔═╡ 2baf4e94-8651-494b-8c76-b05fdba16c99
+function loss_3d_cond(x)
+  	return -elbo_3d_cond(x)
+end
 
 # ╔═╡ f7e9c8c1-7939-4551-9267-28e58bb63191
-# function train_conditional!(enc, dec, data; nepochs=100)
-# 	params = Flux.params(enc, dec)
-# 	opt = ADAM()
-# 	@info "Begin training in 3D latent space"
-# 	for epoch in 1:nepochs
-# 		b_loss = 0
-# 		logσ = Any[]
-# 		for batch in data
-# 			grads = Flux.gradient(params) do
-# 				b_loss, logσ = loss_3d(batch)
-# 				return b_loss
-# 			end
-# 			Flux.Optimise.update!(opt, params, grads)
-# 		end
-# 		@info "Epoch $epoch: loss:$b_loss"
-# 	end
-# 	# return nothing, this mutates the parameters of enc and dec!
-# end
+function train_cond!(enc, dec, data; nepochs=100)
+	params = Flux.params(enc, dec)
+	opt = ADAM()
+	@info "Begin training in 3D latent space with given labels"
+	for epoch in 1:nepochs
+		b_loss = 0
+		for batch in data
+			grads = Flux.gradient(params) do
+				b_loss = loss_3d_cond(batch)
+				return b_loss
+			end
+			Flux.Optimise.update!(opt, params, grads)
+		end
+		@info "Epoch $epoch: loss:$b_loss"
+	end
+	@info "Training in 3D latent space(labels) is done"
+end
 
 # ╔═╡ 780d91c4-c606-48d5-bda6-7512f4ab2d82
-# train_conditional!(encoder_3d, decoder_3d, batches, nepochs=3)
+train_cond!(encoder_cond, decoder_cond, batches_cond, nepochs=3)
+
+# ╔═╡ d41c401c-3ac9-47fa-8f88-c6e81f5d092d
+# begin
+# 	@save "encoder_3d_labels.bson" encoder_cond 
+# 	@save "decoder_3d_labels.bson" decoder_cond
+# end
+
+# ╔═╡ c2ef34f8-2ff9-4731-aed3-0262d4c0b733
+begin
+	BSON.load("encoder_3d_labels.bson", @__MODULE__)
+	BSON.load("decoder_3d_labels.bson", @__MODULE__)
+end
+
+# ╔═╡ 0695dd02-e617-4110-9f5e-234f5cfcad31
+q_μ_cond, q_logσ_cond = encoder_cond(first(batches_cond))
+
+# ╔═╡ 1ad7f796-e1f4-4bba-8e38-3f1ba5628474
+scatter(q_μ_cond[1,:], q_μ_cond[2,:], q_μ_cond[3,:], group=labels, title="A batch 3D latent space of mean vectors for μ given labels", xlabel="z1 for mean μ", ylabel="z2 for mean μ", zlabel="z3 for mean μ")
+
+# ╔═╡ bc46e68f-ea1d-4f3a-b044-38bd7107bd6d
+begin
+	# 1. Sample 10 3D z from the prior p(z)
+	zs_cond = Any[]
+	for i in 1:10
+		sample_z_cond = randn(3,)
+		push!(zs_cond, sample_z_cond)
+	end
+end
+
+# ╔═╡ 6189ad86-5539-4ebd-9413-ad3592b24d24
+# Helper function for drawing the MNIST digit in 28*28 shape
+function draw_image_cond(x)
+	dim = ndims(x)
+	if dim == 2
+		x_2d = reshape(x, 28, 28, :)
+		return Gray.(x_2d)
+	else
+		x_3d = reshape(x, 28, 28)
+		return Gray.(x_3d)
+	end
+end
+
+# ╔═╡ 5902256e-c3e6-4194-b141-eb83e7171206
+begin
+	# 2. decode each z to get logit-means
+	plots1_cond = Any[]
+	plots_cond = Any[]
+	for i in 1:10
+		logit_means_cond = decoder_cond(zs_cond[i])
+		# 3. Transfer logit-means to Bernoulli means μ
+		bern_mean_cond = vec(calculate_bernoulli_mean(logit_means_cond))[1:784]
+		bs = size(bern_mean_cond)
+		@info "bern size: $bs"
+		push!(plots_cond, draw_image_cond(bern_mean_cond))
+		# 5. Sample 1 example from Bernoulli 
+		samples1_cond = rand(Float64, size(bern_mean_cond)) .< bern_mean_cond
+		push!(plots1_cond, draw_image_cond(samples1_cond))
+		
+	end
+end
+
+# ╔═╡ 54c2cccd-2f3d-4bc0-a7eb-4f00367ad619
+begin
+	# 6. Display all plots in a single 10 x 4 grid
+	p_cond = plot(layout = (10,1), size=(500,1200))
+	for i in 1:10
+		heatmap!(cat(plots_cond[i], plots1_cond[i],dims=2), subplot=i)
+	end
+	plot(p_cond)
+end
 
 # ╔═╡ Cell order:
 # ╠═d402633e-8c18-11eb-119d-017ad87927b0
@@ -514,10 +674,9 @@ md"""
 # ╠═c86a877c-90b9-11eb-31d8-bbcb71e4fa66
 # ╠═74171598-5b10-4449-aabb-49b1e168646b
 # ╠═beec9c0c-d5cb-41fa-a5b6-7ba5da4afb68
-# ╠═1c407b72-334e-45a9-8095-da6abff17b20
 # ╠═4a8432e4-5a71-4e2d-96be-3ee4061c42f6
 # ╠═bd5408bc-9998-4bf7-9752-5823f79354f8
-# ╠═7a17bdb1-28f3-4bc3-b28f-b5b71de39088
+# ╠═0fbe4662-7777-4a23-a26c-c3f8968414b9
 # ╟─17c5ddda-90ba-11eb-1fce-93b8306264fb
 # ╠═0a761dc4-90bb-11eb-1f6c-fba559ed5f66
 # ╠═5344b278-82b1-4a14-bf9e-350685c6d57e
@@ -538,8 +697,14 @@ md"""
 # ╠═f5d2e08b-8975-4190-a033-e6630dea3ab9
 # ╠═adc743b0-4174-4fa5-9c11-b30817cc3768
 # ╠═b6a2b5d8-5258-4b75-8611-d25a4a075753
+# ╠═e2c07c18-43c8-4899-b083-05c8180dc7d3
 # ╠═78714227-094e-4a00-a72c-accfb50e1b71
 # ╟─5ca39a1b-4871-4f48-9934-99c88fb504ba
+# ╠═79015407-a145-44ed-853d-ca7c89676ddc
+# ╟─b7ae23ec-1612-40b9-8020-21d5ee5f4c48
+# ╠═b10f4fa4-7fcb-4bc1-975a-55c8079a616a
+# ╠═e4b267fb-c2e9-4341-b261-860b12648127
+# ╟─670121db-0989-4939-86e6-888194affb41
 # ╠═92b6e763-522b-444e-9127-9ff51ef1239b
 # ╠═a08ff202-3e7f-413e-8801-91d609409753
 # ╠═9a5d4ff2-9ccb-4883-84fe-af3f3d52c568
@@ -555,7 +720,22 @@ md"""
 # ╟─f0f3347b-a89f-4ed3-94b6-1be2482fe954
 # ╟─1b1bd03a-09a7-49f9-96e7-45aaa35ef8f4
 # ╠═5a62989d-6b26-4209-a7c2-fde82d5a87b2
-# ╠═5926c5c0-c552-4802-8447-58e526e00659
+# ╟─772f74d7-097b-40e6-a8c9-ee536dcffadc
 # ╠═2c8ae3f0-9e01-40b3-9cb0-0d651a048662
+# ╠═5926c5c0-c552-4802-8447-58e526e00659
+# ╠═b78c9a5c-d66e-4003-9573-2f8d2945c61a
+# ╠═debff640-513f-4b1c-bddf-0cbbe33b0522
+# ╠═2191de84-b685-4b25-816e-f38a6e12db3d
+# ╠═85186d7a-2f4b-4766-8bcf-8edb415af4f8
+# ╠═296bea20-2efa-4a1f-bc14-7d3a61e45bd2
+# ╠═2baf4e94-8651-494b-8c76-b05fdba16c99
 # ╠═f7e9c8c1-7939-4551-9267-28e58bb63191
 # ╠═780d91c4-c606-48d5-bda6-7512f4ab2d82
+# ╠═d41c401c-3ac9-47fa-8f88-c6e81f5d092d
+# ╠═c2ef34f8-2ff9-4731-aed3-0262d4c0b733
+# ╠═0695dd02-e617-4110-9f5e-234f5cfcad31
+# ╠═1ad7f796-e1f4-4bba-8e38-3f1ba5628474
+# ╠═bc46e68f-ea1d-4f3a-b044-38bd7107bd6d
+# ╠═6189ad86-5539-4ebd-9413-ad3592b24d24
+# ╠═5902256e-c3e6-4194-b141-eb83e7171206
+# ╠═54c2cccd-2f3d-4bc0-a7eb-4f00367ad619
