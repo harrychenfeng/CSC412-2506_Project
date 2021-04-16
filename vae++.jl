@@ -51,16 +51,9 @@ size(first(batches))
 
 # ╔═╡ 45bc7e00-90ac-11eb-2d62-092a13dd1360
 md"""
-### Numerical Stability
+### Bernoulli Log Density
 
-The Bernoulli distribution $\text{Ber}(x \mid \mu)$ where $\mu \in [0,1]$ is difficult to optimize for a few reasons.
-
-We prefer unconstrained parameters for gradient optimization. This suggests we might want to transform our parameters into an unconstrained domain, e.g. by parameterizing the `log` parameter.
-
-We also should consider the behaviour of the gradients with respect to our parameter, even under the transformation to unconstrained domain. For instance a poor transformation might encourage optimization into regions where gradient magnitude vanishes. This is often called "saturation".
-
-For this reasons we should use a numerically stable transformation of the Bernoulli parameters. 
-One solution is to parameterize the "logit-means": $y = \log(\frac{\mu}{1-\mu})$.
+The Bernoulli distribution $\text{Ber}(x \mid \mu)$ where $\mu \in [0,1]$ is difficult to optimize for a few reasons. One solution is to parameterize the "logit-means": $y = \log(\frac{\mu}{1-\mu})$.
 
 We can exploit further numerical stability, e.g. in computing $\log(1 + exp(x))$, using library provided functions `log1pexp`
 """
