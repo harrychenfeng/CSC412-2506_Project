@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.14.0
+# v0.14.1
 
 using Markdown
 using InteractiveUtils
@@ -16,9 +16,6 @@ using BSON
 # ╔═╡ 0a761dc4-90bb-11eb-1f6c-fba559ed5f66
 using Plots ##
 
-# ╔═╡ 587b1628-2db2-404e-987c-a7bdaa0bcf51
-using Plots: scatter
-
 # ╔═╡ 5344b278-82b1-4a14-bf9e-350685c6d57e
 using Images
 
@@ -27,34 +24,6 @@ using Statistics
 
 # ╔═╡ 5a62989d-6b26-4209-a7c2-fde82d5a87b2
 using ConditionalDists
-
-# ╔═╡ 9e368304-8c16-11eb-0417-c3792a4cd8ce
-md"""
-# Assignment 3: Variational Autoencoders
-
-- Student Name: Feng Chen
-- Student #: $1002252956$
-- Collaborators: Just myself
-
-## Background
-
-In this assignment we will implement and investigate a Variational Autoencoder as introduced by Kingma and Welling in [Auto-Encoding Variational Bayes](https://arxiv.org/abs/1312.6114).
-
-
-### Data: Binarized MNIST
-
-In this assignment we will consider an  MNIST dataset of $28\times 28$ pixel images where each pixel is **either on or off**.
-
-The binary variable $x_i \in \{0,1\}$ indicates whether the $i$-th pixel is off or on.
-
-Additionally, we also have a digit label $y \in \{0, \dots, 9\}$. Note that we will not use these labels for our generative model. We will, however, use them for our investigation to assist with visualization.
-
-### Tools
-
-In previous assignments you were required to implement a simple neural network and gradient descent manually. In this assignment you are permitted to use a machine learning library for convenience functions such as optimizers, neural network layers, initialization, dataloaders.
-
-However, you **may not use any probabilistic modelling elements** implemented in these frameworks. You cannot use `Distributions.jl` or any similar software. In particular, sampling from and evaluating probability densities under distributions must be written explicitly by code written by you or provided in starter code.
-"""
 
 # ╔═╡ 54749c92-8c1d-11eb-2a54-a1ae0b1dc587
 # load the original greyscale digits
@@ -79,40 +48,6 @@ batches = Flux.Data.DataLoader(binarized_MNIST, batchsize=BS)
 # ╔═╡ db655546-8e84-11eb-21df-25f7c8e82362
 # confirm dimensions are as expected (D,BS)
 size(first(batches))
-
-# ╔═╡ 2093080c-8e85-11eb-1cdb-b35eb40e3949
-md"""
-## Model Definition
-
-Each element in the data $x \in D$ is a vector of $784$ pixels. 
-Each pixel $x_d$ is either on, $x_d = 1$ or off $x_d = 0$.
-
-Each element corresponds to a handwritten digit $\{0, \dots, 9\}$.
-Note that we do not observe these labels, we are *not* training a supervised classifier.
-
-We will introduce a latent variable $z \in \mathbb{R}^2$ to represent the digit.
-The dimensionality of this latent space is chosen so we can easily visualize the learned features. A larger dimensionality would allow a more powerful model. 
-
-
-- **Prior**: The prior over a digit's latent representation is a multivariate standard normal distribution. $p(z) = \mathcal{N}(z \mid \mathbf{0}, \mathbf{1})$
-- **Likelihood**: Given a latent representation $z$ we model the distribution over all 784 pixels as the product of independent Bernoulli distributions parametrized by the output of the "decoder" neural network $f_\theta(z)$.
-```math
-p_\theta(x \mid z) = \prod_{d=1}^{784} \text{Ber}(x_d \mid f_\theta(z)_d)
-```
-
-### Model Parameters
-
-Learning the model will involve optimizing the parameters $\theta$ of the "decoder" neural network, $f_\theta$. 
-
-You may also use library provided layers such as `Dense` [as described in the documentation](https://fluxml.ai/Flux.jl/stable/models/basics/#Stacking-It-Up-1). 
-
-Note that, like many neural network libraries, Flux avoids explicitly providing parameters as function arguments, i.e. `neural_net(z)` instead of `neural_net(z, params)`.
-
-You can access the model parameters `params(neural_net)` for taking gradients `gradient(()->loss(data), params(neural_net))` and updating the parameters with an [Optimiser](https://fluxml.ai/Flux.jl/stable/training/optimisers/).
-
-However, if all this is too fancy feel free to continue using your implementations of simple neural networks and gradient descent from previous assignments.
-
-"""
 
 # ╔═╡ 45bc7e00-90ac-11eb-2d62-092a13dd1360
 md"""
@@ -307,231 +242,10 @@ We will use the model and variational networks to visualize the latent represent
 We will use a variatety of qualitative techniques to get a sense for our model by generating distributions over our data, sampling from them, and interpolating in the latent space.
 """
 
-# ╔═╡ 1201bfee-90bb-11eb-23e5-af9a61f64679
-md"""
-### 1. Latent Distribution of Batch
-
-1. Use `encoder` to produce a batch of latent parameters $\mu, \log \sigma$
-2. Take the 2D mean vector $\mu$ for each latent parameter in the batch.
-3. Plot these mean vectors in the 2D latent space with a scatterplot
-4. Colour each point according to its "digit class label" 0 to 9.
-5. Display a single colourful scatterplot
-"""
-
-# ╔═╡ d908c2f4-90bb-11eb-11b1-b340f58a1584
-# 1. Use encoder to produce a batch of latent parameters μ, logσ
-# Take the first batch
-q_μ, q_logσ = encoder(first(batches))
-
-# ╔═╡ 9676431f-4668-4f66-a7a3-287910bf8c7e
-begin
-	train_labels = Flux.Data.MNIST.labels(:train)
-	label_batches = Flux.Data.DataLoader(train_labels, batchsize=BS)
-	labels = first(label_batches)
+# ╔═╡ 2029fc15-3ed9-4f99-b585-c93fdcdc66fb
+function calculate_bernoulli_mean(logit_mean)
+	return exp.(logit_means) ./ (1 .+ exp.(logit_means))
 end
-
-# ╔═╡ db18e7e2-90bb-11eb-18e5-87e4f094123d
-scatter(q_μ[1,:], q_μ[2,:], group=labels, title="A batch latent space of mean vectors for μ", xlabel="z1 for mean μ", ylabel="z2 for mean μ")
-
-# ╔═╡ d9c5399b-11cc-43db-85ea-f2b5d1f447d8
-savefig("Q1_latent_space.png")
-
-# ╔═╡ dcedbba4-90bb-11eb-2652-bf6448095107
-md"""
-### 2. Visualizing Generative Model of Data
-
-1. Sample 10 $z$ from the prior $p(z)$.
-2. Use the model to decode each $z$ to the distribution logit-means over $x$.
-3. Transform the logit-means to the Bernoulli means $\mu$. (this does not need to be efficient)
-4. For each $z$, visualize the $\mu$ as a $28 \times 28$ greyscale images.
-5. For each $z$, sample 3 examples from the Bernoulli likelihood $x \sim \text{Bern}(x \mid \mu(z))$.
-6. Display all plots in a single 10 x 4 grid. Each row corresponding to a sample $z$. Do not include any axis labels.
-"""
-
-# ╔═╡ 8e6b3b1e-bdb5-4458-b6fc-98dad7349cb0
-# Helper function for drawing the MNIST digit in 28*28 shape
-function draw_image(x)
-	dim = ndims(x)
-	if dim == 2
-		x_2d = reshape(x, 28, 28, :)
-		return Gray.(x_2d)
-	else
-		x_3d = reshape(x, 28, 28)
-		return Gray.(x_3d)
-	end
-	
-end
-
-# ╔═╡ 805a265e-90be-11eb-2c34-1dd0cd1a968c
-begin
-	# 1. Sample 10 z from the prior p(z)
-	zs = Any[]
-	for i in 1:10
-		sample_z = randn(2,)
-		push!(zs, sample_z)
-	end
-end
-
-# ╔═╡ 80d6b61a-90be-11eb-2fae-638cdaaf7abd
-begin
-	# 2. decode each z to get logit-means
-	plots1, plots2, plots3 = Any[], Any[], Any[]
-	plots = Any[]
-	for i in 1:10
-		logit_means = decoder(zs[i])
-		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean = exp.(logit_means) ./ (1 .+ exp.(logit_means))
-		
-		push!(plots, draw_image(bern_mean))
-		
-		# 5. Sample 3 examples from Bernoulli 
-		samples1 = rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots1, draw_image(samples1))
-		
-		samples2 =  rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots2, draw_image(samples2))
-		
-		samples3 = rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots3, draw_image(samples3))
-	end
-end
-
-# ╔═╡ f1a95304-6395-4f59-96dc-c62601255a77
-begin
-	# 6. Display all plots in a single 10 x 4 grid
-	p = plot(layout = (10,1), size=(500,1200))
-	for i in 1:10
-		heatmap!(cat(plots[i], plots1[i], plots2[i], plots3[i], dims=2), subplot=i)
-	end
-	plot(p)
-end
-
-# ╔═╡ 868abcc7-28d8-433e-ac4f-51cc8c5bb848
-savefig("Q2_visualize.png")
-
-# ╔═╡ 82b0a368-90be-11eb-0ddb-310f332a83f0
-md"""
-### 3. Visualizing Regenerative Model and Reconstruction
-
-1. Sample 4 digits from the data $x \sim \mathcal{D}$
-2. Encode each digit to a latent distribution $q_\phi(z)$
-3. For each latent distribution, sample 2 representations $z \sim q_\phi$
-4. Decode each $z$ and transform to the Bernoulli means $\mu$
-5. For each $\mu$, sample 1 "reconstruction" $\hat x \sim \text{Bern}(x \mid \mu)$
-6. For each digit $x$ display (28x28) greyscale images of $x, \mu, \hat x$
-"""
-
-# ╔═╡ f27bdffa-90c0-11eb-0f71-6d572f799290
-begin
-	# 1. Sample 4 digits from the data x~D
-	sample2_i = rand(1:60000, 4)
-	binarized_xs = binarized_MNIST[:,sample2_i]
-	# 2. Encode each digit to a latent distribution 
-	sample2_μ, sample2_logσ = encoder(binarized_xs)
-end
-
-# ╔═╡ edef7f53-02a3-4841-a9e3-56706f0e5ef4
-begin
-	xs = Any[]
-	for i in 1:4
-		push!(xs, draw_image(binarized_xs[:,i]))
-	end
-end
-
-# ╔═╡ 00b7f55e-90c1-11eb-119e-f577037923a9
-begin
-	μs1, μs2, x̂s1, x̂s2 = Any[], Any[], Any[], Any[]
-	for i in 1:4
-		# 3. For each latent distribution, sample 2 representations z~q
-		z1 = sample_from_var_dist(sample2_μ[:,i], sample2_logσ[:,i])
-		z2 = sample_from_var_dist(sample2_μ[:,i], sample2_logσ[:,i])
-		
-		# 4. Decode each z and transform to the Bernoulli means μ
-		logit_means1 = decoder(z1)
-		bern_mean1 = exp.(logit_means1) ./ (1 .+ exp.(logit_means1))
-		push!(μs1, draw_image(bern_mean1))
-		
-		logit_means2 = decoder(z2)
-		bern_mean2 = exp.(logit_means2) ./ (1 .+ exp.(logit_means2))
-		push!(μs2, draw_image(bern_mean2))
-		
-		# 5. For each μ, sample 1 "reconstruction" x_hat ~ Bern(x|μ)
-		x̂1 = rand(Float64, size(bern_mean1)) .< bern_mean1
-		push!(x̂s1, draw_image(x̂1))
-		
-		x̂2 = rand(Float64, size(bern_mean2)) .< bern_mean2
-		push!(x̂s2, draw_image(x̂2))
-	end
-end
-
-# ╔═╡ f41c2f1d-f6f9-49e0-aa20-73b2ce55bf7f
-begin
-	# 6. For each digit x display (28*28) greyscale images of x, μ, x̂
-	p2 = plot(layout = (4,1))
-	# row = 1
-	for i in 1:4
-		heatmap!(cat(xs[i], μs1[i], μs2[i], x̂s1[i], x̂s2[i], dims=2), subplot=i)
-	end
-	plot(p2)
-end
-
-# ╔═╡ cf4d6579-52a5-45bc-81ed-6797f59a2846
-savefig("Q3_visualize.png")
-
-# ╔═╡ 02181adc-90c1-11eb-29d7-736dce72a0ac
-md"""
-### 4. Latent Interpolation Along Lattice
-
-1. Produce a $50 \times 50$ "lattice" or collection of cartesian coordinates $z = (z_x, z_y) \in \mathbb{R}^2$.
-2. For each $z$, decode and transform to a 28x28 greyscale image of the Bernoulli means $\mu$
-3. Each point in the `50x50` latent lattice corresponds now to a `28x28` greyscale image. Concatenate all these images appropriately.
-4. Display a single `1400x1400` pixel greyscale image corresponding to the learned latent space.
-"""
-
-# ╔═╡ 3a0e1d5a-90c2-11eb-16a7-8f9de1ea09e4
-# 1. Produce a 50 * 50 lattice
-begin
-	random_μ_logσ = rand(-1:2/50:1, (2,1,50,50))
-	random_μ_logσ2 = rand(-1:2/50:1, (2,1,50,50))
-	
-	zx = sample_from_var_dist(random_μ_logσ[1,:,:,:], random_μ_logσ[2,:,:,:])
-	zy = sample_from_var_dist(random_μ_logσ2[1,:,:,:], random_μ_logσ2[2,:,:,:])
-	lattice = cat(zx, zy, dims=1)
-end
-
-# ╔═╡ 3a9a2624-90c2-11eb-1986-17b80a2a58c5
-# 2. For each z, decode and transform to a 28 * 28 greyscale image of the Bernoulli means μ
-begin
-	plots_lattice = Any[]
-	for i in 1:50
-		for j in 1:50
-			logit_means_lattice = decoder(lattice[:,i,j])
-			bern_mean_lattice = exp.(logit_means_lattice) ./ (1 .+ exp.(logit_means_lattice))
-			push!(plots_lattice, draw_image(bern_mean_lattice))
-		end
-	end
-end
-
-# ╔═╡ 3b6f8e5e-90c2-11eb-3da4-a5fd3048ab63
-# 3. Each point in the 50x50 latent lattice corresponds now to a 28x28 greyscale image. Concatenate all these images appropriately.
-begin
-	p3 = plot(layout = (50,1),size=(700,700))
-	for i in 1:50
-		start_i = (i-1)*50+1
-		next_i = start_i+1
-		cat_res = cat(plots_lattice[start_i],plots_lattice[next_i], dims=2)
-		for j in 3:50
-			cat_res = cat(cat_res, plots_lattice[(i-1)*50+j], dims=2)
-		end
-		heatmap!(cat_res, subplot=i)
-		car_res = Any[]
-	end
-	# 4. Display a single 1400x1400 pixel greyscale image corresponding to the learned latent space.
-	plot(p3)
-end
-
-# ╔═╡ 4a43c8cc-b2f6-4364-b5f3-8bd58e3f2f2e
-savefig("Q4_visualize.png")
 
 # ╔═╡ de41eda0-2636-4f87-b791-286a84f744ff
 md"""
@@ -626,7 +340,7 @@ function train_3d!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ d6f3c660-c632-4795-8bb9-35e456bebac4
-train_3d!(encoder_3d, decoder_3d, batches, nepochs=3)
+# train_3d!(encoder_3d, decoder_3d, batches, nepochs=3)
 
 # ╔═╡ f5d2e08b-8975-4190-a033-e6630dea3ab9
 # begin
@@ -778,7 +492,6 @@ md"""
 # train_conditional!(encoder_3d, decoder_3d, batches, nepochs=3)
 
 # ╔═╡ Cell order:
-# ╟─9e368304-8c16-11eb-0417-c3792a4cd8ce
 # ╠═d402633e-8c18-11eb-119d-017ad87927b0
 # ╠═54749c92-8c1d-11eb-2a54-a1ae0b1dc587
 # ╠═176f0938-8c1e-11eb-1135-a5db6781404d
@@ -786,7 +499,6 @@ md"""
 # ╠═9e7e46b0-8e84-11eb-1648-0f033e4e6068
 # ╠═743d473c-8c1f-11eb-396d-c92cacb0235b
 # ╠═db655546-8e84-11eb-21df-25f7c8e82362
-# ╟─2093080c-8e85-11eb-1cdb-b35eb40e3949
 # ╟─45bc7e00-90ac-11eb-2d62-092a13dd1360
 # ╠═c70eaa72-90ad-11eb-3600-016807d53697
 # ╠═e12a5b5e-90ad-11eb-25a8-43c9aff1e0db
@@ -815,30 +527,8 @@ md"""
 # ╠═7a17bdb1-28f3-4bc3-b28f-b5b71de39088
 # ╟─17c5ddda-90ba-11eb-1fce-93b8306264fb
 # ╠═0a761dc4-90bb-11eb-1f6c-fba559ed5f66
-# ╟─1201bfee-90bb-11eb-23e5-af9a61f64679
-# ╠═d908c2f4-90bb-11eb-11b1-b340f58a1584
-# ╠═587b1628-2db2-404e-987c-a7bdaa0bcf51
-# ╠═9676431f-4668-4f66-a7a3-287910bf8c7e
-# ╠═db18e7e2-90bb-11eb-18e5-87e4f094123d
-# ╠═d9c5399b-11cc-43db-85ea-f2b5d1f447d8
-# ╟─dcedbba4-90bb-11eb-2652-bf6448095107
 # ╠═5344b278-82b1-4a14-bf9e-350685c6d57e
-# ╠═8e6b3b1e-bdb5-4458-b6fc-98dad7349cb0
-# ╠═805a265e-90be-11eb-2c34-1dd0cd1a968c
-# ╠═80d6b61a-90be-11eb-2fae-638cdaaf7abd
-# ╠═f1a95304-6395-4f59-96dc-c62601255a77
-# ╠═868abcc7-28d8-433e-ac4f-51cc8c5bb848
-# ╟─82b0a368-90be-11eb-0ddb-310f332a83f0
-# ╠═f27bdffa-90c0-11eb-0f71-6d572f799290
-# ╠═edef7f53-02a3-4841-a9e3-56706f0e5ef4
-# ╠═00b7f55e-90c1-11eb-119e-f577037923a9
-# ╠═f41c2f1d-f6f9-49e0-aa20-73b2ce55bf7f
-# ╠═cf4d6579-52a5-45bc-81ed-6797f59a2846
-# ╟─02181adc-90c1-11eb-29d7-736dce72a0ac
-# ╠═3a0e1d5a-90c2-11eb-16a7-8f9de1ea09e4
-# ╠═3a9a2624-90c2-11eb-1986-17b80a2a58c5
-# ╠═3b6f8e5e-90c2-11eb-3da4-a5fd3048ab63
-# ╠═4a43c8cc-b2f6-4364-b5f3-8bd58e3f2f2e
+# ╠═2029fc15-3ed9-4f99-b585-c93fdcdc66fb
 # ╟─de41eda0-2636-4f87-b791-286a84f744ff
 # ╠═0111f7f1-90c8-4ae7-ad75-68b155d4bd30
 # ╠═7a86763d-fa11-48ac-94f0-7bd9874af9c5
