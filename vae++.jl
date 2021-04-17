@@ -10,10 +10,10 @@ using Flux
 # ╔═╡ c70eaa72-90ad-11eb-3600-016807d53697
 using StatsFuns: log1pexp #log(1 + exp(x))
 
-# ╔═╡ 74171598-5b10-4449-aabb-49b1e168646b
+# ╔═╡ a42a19d6-c61e-465f-a3cc-4e9dc7eff826
 using BSON: @save
 
-# ╔═╡ 4a8432e4-5a71-4e2d-96be-3ee4061c42f6
+# ╔═╡ 15de28c7-576f-4f80-9b57-f1112ce14cbf
 using BSON
 
 # ╔═╡ 0a761dc4-90bb-11eb-1f6c-fba559ed5f66
@@ -27,6 +27,9 @@ using Statistics
 
 # ╔═╡ 5a62989d-6b26-4209-a7c2-fde82d5a87b2
 using ConditionalDists
+
+# ╔═╡ a6d94aa9-e4af-4dd1-a31b-b07e53a11e17
+using Flux: onehotbatch
 
 # ╔═╡ 54749c92-8c1d-11eb-2a54-a1ae0b1dc587
 # load the original greyscale digits
@@ -212,13 +215,13 @@ function train!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ c86a877c-90b9-11eb-31d8-bbcb71e4fa66
-# train!(encoder, decoder, batches, nepochs=3)
+train!(encoder, decoder, batches, nepochs=3)
 
 # ╔═╡ beec9c0c-d5cb-41fa-a5b6-7ba5da4afb68
-# begin
-# 	@save "encoder.bson" encoder 
-# 	@save "decoder.bson" decoder 
-# end
+begin
+	@save "encoder.bson" encoder 
+	@save "decoder.bson" decoder 
+end
 
 # ╔═╡ bd5408bc-9998-4bf7-9752-5823f79354f8
 begin
@@ -331,13 +334,13 @@ function train_3d!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ d6f3c660-c632-4795-8bb9-35e456bebac4
-# train_3d!(encoder_3d, decoder_3d, batches, nepochs=3)
+train_3d!(encoder_3d, decoder_3d, batches, nepochs=3)
 
 # ╔═╡ f5d2e08b-8975-4190-a033-e6630dea3ab9
-# begin
-# 	@save "encoder_3d.bson" encoder_3d 
-# 	@save "decoder_3d.bson" decoder_3d
-# end
+begin
+	@save "encoder_3d.bson" encoder_3d 
+	@save "decoder_3d.bson" decoder_3d
+end
 
 # ╔═╡ adc743b0-4174-4fa5-9c11-b30817cc3768
 begin
@@ -516,16 +519,21 @@ Horizontally concate labels to data
 """
 
 # ╔═╡ 2c8ae3f0-9e01-40b3-9cb0-0d651a048662
-encoder_cond = Chain(Dense(Ddata+1, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+encoder_cond = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
 
 # ╔═╡ 5926c5c0-c552-4802-8447-58e526e00659
-decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+1))
+decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
 
-# ╔═╡ b78c9a5c-d66e-4003-9573-2f8d2945c61a
-size(binarized_MNIST)
+# ╔═╡ f19287fa-1ed4-4994-b59a-2731f8accec0
+md"""
+Change labels to one-hot encoding vectors
+"""
+
+# ╔═╡ 89af27db-3cc4-424d-9741-473e863a95e4
+onehot_labels = onehotbatch(train_labels, [:0, :1, :2, :3, :4, :5, :6, :7, :8, :9])
 
 # ╔═╡ debff640-513f-4b1c-bddf-0cbbe33b0522
-batches_cond = Flux.Data.DataLoader(cat(binarized_MNIST, reshape(train_labels, (1,60000)), dims=1), batchsize=BS)
+batches_cond = Flux.Data.DataLoader(cat(binarized_MNIST, onehot_labels, dims=1), batchsize=BS)
 
 # ╔═╡ 2191de84-b685-4b25-816e-f38a6e12db3d
 function log_likelihood_cond(x,z)
@@ -575,10 +583,10 @@ end
 train_cond!(encoder_cond, decoder_cond, batches_cond, nepochs=3)
 
 # ╔═╡ d41c401c-3ac9-47fa-8f88-c6e81f5d092d
-# begin
-# 	@save "encoder_3d_labels.bson" encoder_cond 
-# 	@save "decoder_3d_labels.bson" decoder_cond
-# end
+begin
+	@save "encoder_3d_labels.bson" encoder_cond 
+	@save "decoder_3d_labels.bson" decoder_cond
+end
 
 # ╔═╡ c2ef34f8-2ff9-4731-aed3-0262d4c0b733
 begin
@@ -588,6 +596,11 @@ end
 
 # ╔═╡ 0695dd02-e617-4110-9f5e-234f5cfcad31
 q_μ_cond, q_logσ_cond = encoder_cond(first(batches_cond))
+
+# ╔═╡ 395bec09-3908-4095-afdb-ade87f6b6078
+md"""
+###### Visualize latent representation
+"""
 
 # ╔═╡ 1ad7f796-e1f4-4bba-8e38-3f1ba5628474
 scatter(q_μ_cond[1,:], q_μ_cond[2,:], q_μ_cond[3,:], group=labels, title="A batch 3D latent space of mean vectors for μ given labels", xlabel="z1 for mean μ", ylabel="z2 for mean μ", zlabel="z3 for mean μ")
@@ -624,8 +637,8 @@ begin
 		logit_means_cond = decoder_cond(zs_cond[i])
 		# 3. Transfer logit-means to Bernoulli means μ
 		bern_mean_cond = vec(calculate_bernoulli_mean(logit_means_cond))[1:784]
-		bs = size(bern_mean_cond)
-		@info "bern size: $bs"
+		# bs = size(bern_mean_cond)
+		# @info "bern size: $bs"
 		push!(plots_cond, draw_image_cond(bern_mean_cond))
 		# 5. Sample 1 example from Bernoulli 
 		samples1_cond = rand(Float64, size(bern_mean_cond)) .< bern_mean_cond
@@ -642,6 +655,90 @@ begin
 		heatmap!(cat(plots_cond[i], plots1_cond[i],dims=2), subplot=i)
 	end
 	plot(p_cond)
+end
+
+# ╔═╡ f50eeab6-7cda-4593-9f3b-6ac6dc258ba6
+md"""
+###### Semi-supervised learning
+"""
+
+# ╔═╡ 5836cc48-dc6b-4768-bcb4-b7a5693e3deb
+begin
+	onehot_semi = Matrix(onehot_labels)
+	index = rand(1:60000,45000)
+	onehot_semi[:,index] = zeros(10, 45000)
+end
+
+# ╔═╡ 97bff68e-54af-4b4f-8d0f-5fcda48be845
+batches_semi = Flux.Data.DataLoader(cat(binarized_MNIST, onehot_semi, dims=1), batchsize=BS)
+
+# ╔═╡ f248ae66-6a8f-47d8-808a-8b5b3efaf795
+encoder_semi = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+
+# ╔═╡ d93b609a-4a5b-4c5f-af43-801083d8b67f
+decoder_semi = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+
+# ╔═╡ bb620ae9-7a38-4c39-8026-fb3a9ffb768e
+function train_semi!(enc, dec, data; nepochs=100)
+	params = Flux.params(enc, dec)
+	opt = ADAM()
+	@info "Begin training in 3D latent space with given semi labels"
+	for epoch in 1:nepochs
+		b_loss = 0
+		for batch in data
+			grads = Flux.gradient(params) do
+				b_loss = loss_3d_cond(batch)
+				return b_loss
+			end
+			Flux.Optimise.update!(opt, params, grads)
+		end
+		@info "Epoch $epoch: loss:$b_loss"
+	end
+	@info "Training in 3D latent space(semi labels) is done"
+end
+
+# ╔═╡ beade4cf-6b98-48d5-ad02-8102360fa55a
+train_cond!(encoder_semi, decoder_semi, batches_semi, nepochs=3)
+
+# ╔═╡ 024ea208-3ae1-43e8-8758-d049d0eff5d3
+begin
+	@save "encoder_semi.bson" encoder_semi
+	@save "decoder_semi.bson" decoder_semi
+end
+
+# ╔═╡ 1faa33a5-b679-442a-b983-16cab2b48ad9
+begin
+	BSON.load("encoder_semi.bson", @__MODULE__)
+	BSON.load("decoder_semi.bson", @__MODULE__)
+end
+
+# ╔═╡ 0fc0995f-f87a-4c13-b33a-ab01f86f3d1c
+begin
+	# 2. decode each z to get logit-means
+	plots1_semi = Any[]
+	plots_semi = Any[]
+	for i in 1:10
+		logit_means_semi = decoder_cond(zs_cond[i])
+		# 3. Transfer logit-means to Bernoulli means μ
+		bern_mean_semi = vec(calculate_bernoulli_mean(logit_means_semi))[1:784]
+		# bs = size(bern_mean_cond)
+		# @info "bern size: $bs"
+		push!(plots_semi, draw_image_cond(bern_mean_semi))
+		# 5. Sample 1 example from Bernoulli 
+		samples1_semi = rand(Float64, size(bern_mean_semi)) .< bern_mean_semi
+		push!(plots1_semi, draw_image_cond(samples1_semi))
+		
+	end
+end
+
+# ╔═╡ 3639bf58-809f-4221-8c91-8abbe218d0b4
+begin
+	# 6. Display all plots in a single 10 x 4 grid
+	p_semi = plot(layout = (10,1), size=(500,1200))
+	for i in 1:10
+		heatmap!(cat(plots_semi[i], plots1_semi[i],dims=2), subplot=i)
+	end
+	plot(p_semi)
 end
 
 # ╔═╡ Cell order:
@@ -672,9 +769,9 @@ end
 # ╟─70ccd9a4-90b7-11eb-1fb2-3f7aff4073a0
 # ╠═5efb0baa-90b8-11eb-304f-7dbb8d5c0ba6
 # ╠═c86a877c-90b9-11eb-31d8-bbcb71e4fa66
-# ╠═74171598-5b10-4449-aabb-49b1e168646b
+# ╠═a42a19d6-c61e-465f-a3cc-4e9dc7eff826
 # ╠═beec9c0c-d5cb-41fa-a5b6-7ba5da4afb68
-# ╠═4a8432e4-5a71-4e2d-96be-3ee4061c42f6
+# ╠═15de28c7-576f-4f80-9b57-f1112ce14cbf
 # ╠═bd5408bc-9998-4bf7-9752-5823f79354f8
 # ╠═0fbe4662-7777-4a23-a26c-c3f8968414b9
 # ╟─17c5ddda-90ba-11eb-1fce-93b8306264fb
@@ -723,7 +820,9 @@ end
 # ╟─772f74d7-097b-40e6-a8c9-ee536dcffadc
 # ╠═2c8ae3f0-9e01-40b3-9cb0-0d651a048662
 # ╠═5926c5c0-c552-4802-8447-58e526e00659
-# ╠═b78c9a5c-d66e-4003-9573-2f8d2945c61a
+# ╟─f19287fa-1ed4-4994-b59a-2731f8accec0
+# ╠═a6d94aa9-e4af-4dd1-a31b-b07e53a11e17
+# ╠═89af27db-3cc4-424d-9741-473e863a95e4
 # ╠═debff640-513f-4b1c-bddf-0cbbe33b0522
 # ╠═2191de84-b685-4b25-816e-f38a6e12db3d
 # ╠═85186d7a-2f4b-4766-8bcf-8edb415af4f8
@@ -734,8 +833,20 @@ end
 # ╠═d41c401c-3ac9-47fa-8f88-c6e81f5d092d
 # ╠═c2ef34f8-2ff9-4731-aed3-0262d4c0b733
 # ╠═0695dd02-e617-4110-9f5e-234f5cfcad31
+# ╟─395bec09-3908-4095-afdb-ade87f6b6078
 # ╠═1ad7f796-e1f4-4bba-8e38-3f1ba5628474
 # ╠═bc46e68f-ea1d-4f3a-b044-38bd7107bd6d
 # ╠═6189ad86-5539-4ebd-9413-ad3592b24d24
 # ╠═5902256e-c3e6-4194-b141-eb83e7171206
 # ╠═54c2cccd-2f3d-4bc0-a7eb-4f00367ad619
+# ╟─f50eeab6-7cda-4593-9f3b-6ac6dc258ba6
+# ╠═5836cc48-dc6b-4768-bcb4-b7a5693e3deb
+# ╠═97bff68e-54af-4b4f-8d0f-5fcda48be845
+# ╠═f248ae66-6a8f-47d8-808a-8b5b3efaf795
+# ╠═d93b609a-4a5b-4c5f-af43-801083d8b67f
+# ╠═bb620ae9-7a38-4c39-8026-fb3a9ffb768e
+# ╠═beade4cf-6b98-48d5-ad02-8102360fa55a
+# ╠═024ea208-3ae1-43e8-8758-d049d0eff5d3
+# ╠═1faa33a5-b679-442a-b983-16cab2b48ad9
+# ╠═0fc0995f-f87a-4c13-b33a-ab01f86f3d1c
+# ╠═3639bf58-809f-4221-8c91-8abbe218d0b4
