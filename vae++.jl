@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.14.0
+# v0.14.2
 
 using Markdown
 using InteractiveUtils
@@ -30,6 +30,12 @@ using ConditionalDists
 
 # ╔═╡ a6d94aa9-e4af-4dd1-a31b-b07e53a11e17
 using Flux: onehotbatch
+
+# ╔═╡ 63b0f25f-076c-4b0f-b09b-5ecd9d317e13
+using Distributions
+
+# ╔═╡ ebfce7a9-6f8e-4977-91cc-50fb4f27c395
+using SpecialFunctions
 
 # ╔═╡ 54749c92-8c1d-11eb-2a54-a1ae0b1dc587
 # load the original greyscale digits
@@ -741,6 +747,193 @@ begin
 	plot(p_semi)
 end
 
+# ╔═╡ 5bd4471f-d3c3-451d-94ee-05a30132e2b9
+md"""
+### Optimizing Different Divergences
+"""
+
+# ╔═╡ 077026fc-808f-46ef-8308-d32f50b0e12f
+function create_enc_dec()
+	encoder = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz*2), unpack_guassian_params)
+	decoder = Chain(Dense(Dz, Dh, tanh), Dense(Dh, Ddata))
+	return encoder, decoder
+end
+
+# ╔═╡ 1ebf3383-03c8-434d-8f09-9621344c686b
+enc1, dec1 = create_enc_dec()
+
+# ╔═╡ 2bd2d7da-5798-4104-89cf-a81f4d553be5
+function elbo_js(x)	
+	q_μ, q_logσ = enc1(x)
+  	z = sample_from_var_dist(q_μ, q_logσ)
+  	joint_ll = joint_log_density(x,z)
+  	log_q_z = log_q(z, q_μ, q_logσ)
+	p = exp.(joint_ll)
+	q = exp.(log_q_z)
+	# kl(p,q) = sum(p .* log.(p ./ q))
+	m = 0.5*log.(p+q)
+	# pm = kl(p,m)
+	# qm = kl(q,m)
+	pm = sum(joint_ll - m)/size(x)[2]
+	qm = sum(log_q_z - m)/size(x)[2]
+	# elbo_estimate = sum(p .* log.(p ./ q)- p + q)/size(x)[2]
+  	# elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+	elbo_estimate = 0.5*pm + 0.5*qm
+  	return elbo_estimate
+end
+
+# ╔═╡ 0d27ad7a-d3a2-4873-bf5f-f6585fc63882
+function loss_js(x)
+  	return -elbo_js(x)
+end
+
+# ╔═╡ 1c1dd8a7-697e-45e2-9734-f221b2e46978
+function train_js!(enc, dec, data; nepochs=100)
+	params = Flux.params(enc, dec)
+	opt = ADAM()
+	@info "Begin training in 2D latent space using JS Divergence"
+	for epoch in 1:nepochs
+		b_loss = 0
+		for batch in data
+			# compute gradient wrt loss
+			grads = Flux.gradient(params) do
+				b_loss = loss_js(batch)
+				return b_loss
+			end
+			# update parameters
+			Flux.Optimise.update!(opt, params, grads)
+		end
+		@info "Epoch $epoch: loss:$b_loss"
+	end
+	@info "Training in 2D using JS Divergence is done"
+end
+
+# ╔═╡ 53eeb659-3083-45ea-a001-23e16c29388a
+train_js!(enc1, dec1, batches, nepochs=1)
+
+# ╔═╡ 48d0afee-667b-4b9f-8610-2abb5973ef86
+# begin
+# 	@save "encoder_js.bson" encoder_js
+# 	@save "decoder_js.bson" decoder_js
+# end
+
+# ╔═╡ 8b190d6d-ed7e-4e19-9228-6ec3a8d6934e
+# begin
+# 	BSON.load("encoder_js.bson", @__MODULE__)
+# 	BSON.load("decoder_js.bson", @__MODULE__)
+# end
+
+# ╔═╡ 52a9a59f-1e3a-484f-87bd-22dbdc0d704b
+function visualize_samples(decoder)
+	plots1 = Any[]
+	plots = Any[]
+	for i in 1:10
+		# 1. Sample 10 3D z from the prior p(z)
+		z = randn(2,)
+		# 2. decode each z to get logit-means
+		logit_means = decoder(z)
+		# 3. Transfer logit-means to Bernoulli means μ
+		bern_mean = calculate_bernoulli_mean(logit_means)
+		push!(plots, draw_image(bern_mean))
+		# 5. Sample 1 example from Bernoulli 
+		samples1 = rand(Float64, size(bern_mean)) .< bern_mean
+		push!(plots1, draw_image(samples1))
+	end
+	return plots1, plots
+end
+
+# ╔═╡ d25834fb-b564-4a54-aacb-0bac51b45e70
+plots1_1, plots_1 = visualize_samples(dec1)
+
+# ╔═╡ aab34582-8cbb-4ff2-ab1b-d660755acbec
+function plot_mnist_image(plots, plots1)
+	# 6. Display all plots in a single 10 x 4 grid
+	p = plot(layout = (10,1), size=(500,1200))
+	for i in 1:10
+		heatmap!(cat(plots[i], plots1[i],dims=2), subplot=i)
+	end
+	plot(p)
+end
+
+# ╔═╡ 30772ff5-c234-4e4b-8906-e89719be6435
+# plot_mnist_image(plots_1, plots1_1)
+
+# ╔═╡ 888a7310-82fe-40af-b4fd-92577fa46e4d
+md"""
+### More Expressive Likelihood Model
+Use beta likelihood model with $α=2$, $β=2$ on float MNIST
+"""
+
+# ╔═╡ 619cbde6-05ec-4f2a-af3d-4bc575d0be49
+float_MNIST = convert(Array{Float64}, greyscale_MNIST)
+
+# ╔═╡ e4e852e5-1db7-4a5f-943d-ca24df4af351
+function beta_log_density(x, logit_means, α, β) 
+	b = x .* 2 .- 1
+	B = gamma(α)*gamma(β) / gamma(α+β)
+	return - log1pexp.(-b .* logit_means / B)
+end
+
+# ╔═╡ 072c7766-f386-417d-94f6-cb135e7c1dc1
+encoder_beta, decoder_beta = create_enc_dec()
+
+# ╔═╡ 538d688e-3ee0-43a3-bfb1-bd469c065d8d
+function log_likelihood_beta(x, z, α, β)
+  """ Compute log likelihood log_p(x|z)"""
+	return sum(beta_log_density(x, decoder_beta(z), α, β),dims=1)
+end
+
+# ╔═╡ e708275d-1b98-4127-a8a0-b6e8b4adf53b
+joint_log_density_beta(x,z, α, β) = log_prior(z) .+ log_likelihood_beta(x,z,α, β)
+
+# ╔═╡ b79ea401-e26d-4d69-96b5-544a83f8dba8
+function elbo_beta(x)	
+	q_μ, q_logσ = encoder_beta(x)
+  	z = sample_from_var_dist(q_μ, q_logσ)
+  	joint_ll = joint_log_density_beta(x,z, 2, 2)
+  	log_q_z = log_q(z, q_μ, q_logσ)
+  	elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+  	return elbo_estimate
+end
+
+# ╔═╡ b2d83b4d-0075-461d-ae8e-5d38badc48fe
+function loss_beta(x)
+  	return -elbo_beta(x)
+end
+
+# ╔═╡ 9652c66e-b144-4dba-9dfe-65c9d57ff339
+function train_beta!(enc, dec, data; nepochs=100)
+	params = Flux.params(enc, dec)
+	opt = ADAM()
+	@info "Begin training in 2D latent space using Beta likelihood on float MNIST"
+	for epoch in 1:nepochs
+		b_loss = 0
+		for batch in data
+			# compute gradient wrt loss
+			grads = Flux.gradient(params) do
+				b_loss = loss_beta(batch)
+				return b_loss
+			end
+			# update parameters
+			Flux.Optimise.update!(opt, params, grads)
+		end
+		@info "Epoch $epoch: loss:$b_loss"
+	end
+	@info "Training in 2D using Beta likelihood is done"
+end
+
+# ╔═╡ 71007aa0-5ab4-4e69-831e-55f661572283
+float_batches = Flux.Data.DataLoader(float_MNIST, batchsize=BS)
+
+# ╔═╡ 1bfe2a17-5f4a-45a0-bae5-32fd61f1ccf1
+train_beta!(encoder_beta, decoder_beta, float_batches, nepochs=3)
+
+# ╔═╡ c8f3397e-fdf2-4334-98c9-96ea390aa099
+plots1_beta, plots_beta = visualize_samples(decoder_beta)
+
+# ╔═╡ 405ce3bc-124d-4815-8732-c967a01f1d66
+plot_mnist_image(plots_beta, plots1_beta)
+
 # ╔═╡ Cell order:
 # ╠═d402633e-8c18-11eb-119d-017ad87927b0
 # ╠═54749c92-8c1d-11eb-2a54-a1ae0b1dc587
@@ -850,3 +1043,31 @@ end
 # ╠═1faa33a5-b679-442a-b983-16cab2b48ad9
 # ╠═0fc0995f-f87a-4c13-b33a-ab01f86f3d1c
 # ╠═3639bf58-809f-4221-8c91-8abbe218d0b4
+# ╟─5bd4471f-d3c3-451d-94ee-05a30132e2b9
+# ╠═077026fc-808f-46ef-8308-d32f50b0e12f
+# ╠═1ebf3383-03c8-434d-8f09-9621344c686b
+# ╠═2bd2d7da-5798-4104-89cf-a81f4d553be5
+# ╠═0d27ad7a-d3a2-4873-bf5f-f6585fc63882
+# ╠═1c1dd8a7-697e-45e2-9734-f221b2e46978
+# ╠═53eeb659-3083-45ea-a001-23e16c29388a
+# ╠═48d0afee-667b-4b9f-8610-2abb5973ef86
+# ╠═8b190d6d-ed7e-4e19-9228-6ec3a8d6934e
+# ╠═52a9a59f-1e3a-484f-87bd-22dbdc0d704b
+# ╠═d25834fb-b564-4a54-aacb-0bac51b45e70
+# ╠═aab34582-8cbb-4ff2-ab1b-d660755acbec
+# ╠═30772ff5-c234-4e4b-8906-e89719be6435
+# ╟─888a7310-82fe-40af-b4fd-92577fa46e4d
+# ╠═63b0f25f-076c-4b0f-b09b-5ecd9d317e13
+# ╠═ebfce7a9-6f8e-4977-91cc-50fb4f27c395
+# ╠═619cbde6-05ec-4f2a-af3d-4bc575d0be49
+# ╠═e4e852e5-1db7-4a5f-943d-ca24df4af351
+# ╠═538d688e-3ee0-43a3-bfb1-bd469c065d8d
+# ╠═e708275d-1b98-4127-a8a0-b6e8b4adf53b
+# ╠═072c7766-f386-417d-94f6-cb135e7c1dc1
+# ╠═b79ea401-e26d-4d69-96b5-544a83f8dba8
+# ╠═b2d83b4d-0075-461d-ae8e-5d38badc48fe
+# ╠═9652c66e-b144-4dba-9dfe-65c9d57ff339
+# ╠═71007aa0-5ab4-4e69-831e-55f661572283
+# ╠═1bfe2a17-5f4a-45a0-bae5-32fd61f1ccf1
+# ╠═c8f3397e-fdf2-4334-98c9-96ea390aa099
+# ╠═405ce3bc-124d-4815-8732-c967a01f1d66
