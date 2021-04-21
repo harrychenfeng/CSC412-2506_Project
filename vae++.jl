@@ -25,9 +25,6 @@ using Images
 # ╔═╡ 0155586a-9ffc-4319-bb93-6aeab31f670e
 using Statistics
 
-# ╔═╡ 5a62989d-6b26-4209-a7c2-fde82d5a87b2
-using ConditionalDists
-
 # ╔═╡ a6d94aa9-e4af-4dd1-a31b-b07e53a11e17
 using Flux: onehotbatch
 
@@ -258,17 +255,15 @@ md"""
 ###### Experimented a 3D latent space and make visualization
 """
 
+# ╔═╡ a47cc636-cbd1-4ec6-9084-9e44a436f3a8
+function create_enc_dec(Dz, unpack_method)
+	encoder = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz*2), unpack_method)
+	decoder = Chain(Dense(Dz, Dh, tanh), Dense(Dh, Ddata))
+	return encoder, decoder
+end
+
 # ╔═╡ 0111f7f1-90c8-4ae7-ad75-68b155d4bd30
 Dz_3d = 3
-
-# ╔═╡ 7a86763d-fa11-48ac-94f0-7bd9874af9c5
-decoder_3d = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata))
-
-# ╔═╡ 3553b2af-d10b-4df5-b67a-ba3d252b7e0e
-function log_likelihood_larger(x,z)
-  """ Compute log likelihood log_p(x|z)"""
-	return sum(bernoulli_log_density(x, decoder_3d(z)),dims=1)
-end
 
 # ╔═╡ adc7cc1a-dd3d-48bc-8c34-7d30b684199d
 function unpack_guassian_params_3d(output)
@@ -276,8 +271,14 @@ function unpack_guassian_params_3d(output)
 	return μ, logσ
 end
 
-# ╔═╡ 65718db9-5ab1-46d0-9dfb-3b234c956e1f
-encoder_3d = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+# ╔═╡ 7a86763d-fa11-48ac-94f0-7bd9874af9c5
+encoder_3d, decoder_3d = create_enc_dec(Dz_3d, unpack_guassian_params_3d)
+
+# ╔═╡ 3553b2af-d10b-4df5-b67a-ba3d252b7e0e
+function log_likelihood_larger(x,z)
+  """ Compute log likelihood log_p(x|z)"""
+	return sum(bernoulli_log_density(x, decoder_3d(z)),dims=1)
+end
 
 # ╔═╡ 28172ef1-06c6-4236-b027-b55c79ce94f1
 sample_from_var_dist_3d(μ, logσ) = (randn(size(μ)) .* exp.(logσ) .+ μ)
@@ -342,18 +343,6 @@ end
 # ╔═╡ d6f3c660-c632-4795-8bb9-35e456bebac4
 train_3d!(encoder_3d, decoder_3d, batches, nepochs=3)
 
-# ╔═╡ f5d2e08b-8975-4190-a033-e6630dea3ab9
-begin
-	@save "encoder_3d.bson" encoder_3d 
-	@save "decoder_3d.bson" decoder_3d
-end
-
-# ╔═╡ adc743b0-4174-4fa5-9c11-b30817cc3768
-begin
-	BSON.load("encoder_3d.bson", @__MODULE__)
-	BSON.load("decoder_3d.bson", @__MODULE__)
-end
-
 # ╔═╡ b6a2b5d8-5258-4b75-8611-d25a4a075753
 q_μ_3d, q_logσ_3d = encoder_3d(first(batches))
 
@@ -386,85 +375,56 @@ function draw_image(x)
 	end
 end
 
+# ╔═╡ 8e9b5bd6-5d29-4127-8256-c71f65f50536
+function visualize_samples(decoder, dim)
+	plots1 = Any[]
+	plots = Any[]
+	for i in 1:5
+		# 1. Sample five 2D/3D zs from the prior p(z)
+		z = randn(dim,)
+		# 2. decode each z to get logit-means
+		logit_means = decoder(z)
+		# 3. Transfer logit-means to Bernoulli means μ
+		bern_mean = calculate_bernoulli_mean(logit_means)[1:784]
+		push!(plots, draw_image(bern_mean))
+		# 5. Sample 1 example from Bernoulli 
+		samples1 = rand(Float64, size(bern_mean)) .< bern_mean
+		push!(plots1, draw_image(samples1))
+	end
+	return plots1, plots
+end
+
+# ╔═╡ 012cda0a-b79e-44cc-a3c4-51c7d954de0e
+function plot_mnist_image(plots, plots1)
+	# 6. Display all plots in a single 10 x 4 grid
+	p = plot(layout = (5,1), size=(500,800))
+	for i in 1:5
+		heatmap!(cat(plots[i], plots1[i], dims=2), subplot=i)
+	end
+	plot(p)
+end
+
 # ╔═╡ b7ae23ec-1612-40b9-8020-21d5ee5f4c48
 md"""
 Baseline (2D latent space)
 """
 
-# ╔═╡ b10f4fa4-7fcb-4bc1-975a-55c8079a616a
-begin
-	# 1. Sample 10 2D z from the prior p(z)
-	zs = Any[]
-	for i in 1:10
-		sample_z = randn(2,)
-		push!(zs, sample_z)
-	end
-end
-
-# ╔═╡ e4b267fb-c2e9-4341-b261-860b12648127
-begin
-	# 2. decode each z to get logit-means
-	plots1, plots2, plots3 = Any[], Any[], Any[]
-	plots = Any[]
-	for i in 1:10
-		logit_means = decoder(zs[i])
-		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean = calculate_bernoulli_mean(logit_means)
-		push!(plots, draw_image(bern_mean))
-		# 5. Sample 3 examples from Bernoulli
-		samples1 = rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots1, draw_image(samples1))
-		samples2 = rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots2, draw_image(samples2))
-		samples3 = rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots3, draw_image(samples3))
-	end
-end
+# ╔═╡ af6b3831-1de5-47e4-afaf-c9cd4adb640f
+plots1_2D, plots_2D = visualize_samples(decoder, 2)
 
 # ╔═╡ 670121db-0989-4939-86e6-888194affb41
 md"""
 Model with larger dimension (3D latent space)
 """
 
-# ╔═╡ 92b6e763-522b-444e-9127-9ff51ef1239b
-begin
-	# 1. Sample 10 3D z from the prior p(z)
-	zs_3d = Any[]
-	for i in 1:10
-		sample_z_3d = randn(3,)
-		push!(zs_3d, sample_z_3d)
-	end
-end
+# ╔═╡ a9623ea4-e2cc-424f-8725-4c67d801ce19
+plots1_3D, plots_3D = visualize_samples(decoder_3d, 3)
 
-# ╔═╡ a08ff202-3e7f-413e-8801-91d609409753
-begin
-	# 2. decode each z to get logit-means
-	plots1_3d, plots2_3d, plots3_3d = Any[], Any[], Any[]
-	plots_3d = Any[]
-	for i in 1:10
-		logit_means_3d = decoder_3d(zs_3d[i])
-		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean_3d = calculate_bernoulli_mean(logit_means_3d)
-		push!(plots_3d, draw_image(bern_mean_3d))
-		# 5. Sample 3 examples from Bernoulli 
-		samples1_3d = rand(Float64, size(bern_mean_3d)) .< bern_mean_3d
-		push!(plots1_3d, draw_image(samples1_3d))
-		samples2_3d =  rand(Float64, size(bern_mean_3d)) .< bern_mean_3d
-		push!(plots2_3d, draw_image(samples2_3d))
-		samples3_3d = rand(Float64, size(bern_mean_3d)) .< bern_mean_3d
-		push!(plots3_3d, draw_image(samples3_3d))
-	end
-end
+# ╔═╡ 0a61fd36-b757-4852-818a-a5e65d3f312f
+plot_mnist_image(plots_2D, plots_3D)
 
-# ╔═╡ 9a5d4ff2-9ccb-4883-84fe-af3f3d52c568
-begin
-	# 6. Display all plots in a single 10 x 4 grid
-	p_3d = plot(layout = (10,1), size=(500,1200))
-	for i in 1:10
-		heatmap!(cat(plots[i], plots1[i], plots2[i], plots3[i], plots_3d[i], plots1_3d[i], plots2_3d[i], plots3_3d[i],dims=2), subplot=i)
-	end
-	plot(p_3d)
-end
+# ╔═╡ 62d47455-4d48-480a-ad34-0b9cb37be6cb
+plot_mnist_image(plots1_2D, plots1_3D)
 
 # ╔═╡ 2a3caf33-8f54-42a0-ad52-a1fae4863a6a
 md"""
@@ -525,10 +485,10 @@ Horizontally concate labels to data
 """
 
 # ╔═╡ 2c8ae3f0-9e01-40b3-9cb0-0d651a048662
-encoder_cond = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
-
-# ╔═╡ 5926c5c0-c552-4802-8447-58e526e00659
-decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+begin
+	encoder_cond = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+	decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+end
 
 # ╔═╡ f19287fa-1ed4-4994-b59a-2731f8accec0
 md"""
@@ -609,17 +569,7 @@ md"""
 """
 
 # ╔═╡ 1ad7f796-e1f4-4bba-8e38-3f1ba5628474
-scatter(q_μ_cond[1,:], q_μ_cond[2,:], q_μ_cond[3,:], group=labels, title="A batch 3D latent space of mean vectors for μ given labels", xlabel="z1 for mean μ", ylabel="z2 for mean μ", zlabel="z3 for mean μ")
-
-# ╔═╡ bc46e68f-ea1d-4f3a-b044-38bd7107bd6d
-begin
-	# 1. Sample 10 3D z from the prior p(z)
-	zs_cond = Any[]
-	for i in 1:10
-		sample_z_cond = randn(3,)
-		push!(zs_cond, sample_z_cond)
-	end
-end
+scatter(q_μ_cond[1,:], q_μ_cond[2,:], q_μ_cond[3,:], group=labels, title="A batch 3D latent space of mean vectors for μ | labels", xlabel="z1 for mean μ", ylabel="z2 for mean μ", zlabel="z3 for mean μ")
 
 # ╔═╡ 6189ad86-5539-4ebd-9413-ad3592b24d24
 # Helper function for drawing the MNIST digit in 28*28 shape
@@ -634,34 +584,11 @@ function draw_image_cond(x)
 	end
 end
 
-# ╔═╡ 5902256e-c3e6-4194-b141-eb83e7171206
-begin
-	# 2. decode each z to get logit-means
-	plots1_cond = Any[]
-	plots_cond = Any[]
-	for i in 1:10
-		logit_means_cond = decoder_cond(zs_cond[i])
-		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean_cond = vec(calculate_bernoulli_mean(logit_means_cond))[1:784]
-		# bs = size(bern_mean_cond)
-		# @info "bern size: $bs"
-		push!(plots_cond, draw_image_cond(bern_mean_cond))
-		# 5. Sample 1 example from Bernoulli 
-		samples1_cond = rand(Float64, size(bern_mean_cond)) .< bern_mean_cond
-		push!(plots1_cond, draw_image_cond(samples1_cond))
-		
-	end
-end
+# ╔═╡ 3b9c1ed3-c083-484e-89b7-253923da794e
+plots1_cond, plots_cond = visualize_samples(decoder_cond, 3)
 
-# ╔═╡ 54c2cccd-2f3d-4bc0-a7eb-4f00367ad619
-begin
-	# 6. Display all plots in a single 10 x 4 grid
-	p_cond = plot(layout = (10,1), size=(500,1200))
-	for i in 1:10
-		heatmap!(cat(plots_cond[i], plots1_cond[i],dims=2), subplot=i)
-	end
-	plot(p_cond)
-end
+# ╔═╡ a34bc0c1-ca8c-4535-86bb-64c1ea10d1e9
+plot_mnist_image(plots_cond, plots1_cond)
 
 # ╔═╡ f50eeab6-7cda-4593-9f3b-6ac6dc258ba6
 md"""
@@ -671,18 +598,43 @@ md"""
 # ╔═╡ 5836cc48-dc6b-4768-bcb4-b7a5693e3deb
 begin
 	onehot_semi = Matrix(onehot_labels)
-	index = rand(1:60000,45000)
-	onehot_semi[:,index] = zeros(10, 45000)
+	index = rand(1:60000,30000)
+	onehot_semi[:,index] = zeros(10, 30000)
 end
 
 # ╔═╡ 97bff68e-54af-4b4f-8d0f-5fcda48be845
 batches_semi = Flux.Data.DataLoader(cat(binarized_MNIST, onehot_semi, dims=1), batchsize=BS)
 
 # ╔═╡ f248ae66-6a8f-47d8-808a-8b5b3efaf795
-encoder_semi = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+begin
+	encoder_semi = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
+	decoder_semi = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+end
 
-# ╔═╡ d93b609a-4a5b-4c5f-af43-801083d8b67f
-decoder_semi = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+# ╔═╡ cc7274c4-1591-4b3d-a727-173243240adf
+function log_likelihood_semi(x,z)
+  """ Compute log likelihood log_p(x|z)"""
+	# use numerically stable bernoulli
+	return sum(bernoulli_log_density(x, decoder_semi(z)),dims=1)
+end
+
+# ╔═╡ dea35b3d-a22f-4765-a750-26baea97b630
+joint_log_density_semi(x,z) = log_prior(z) .+ log_likelihood_semi(x,z)
+
+# ╔═╡ bbe80124-1a79-443f-baf0-4a97ffab3693
+function elbo_3d_semi(x)	
+	q_μ, q_logσ = encoder_semi(x)
+  	z = sample_from_var_dist_3d(q_μ, q_logσ)
+  	joint_ll = joint_log_density_semi(x,z)
+  	log_q_z = log_q(z, q_μ, q_logσ)
+  	elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+  	return elbo_estimate
+end
+
+# ╔═╡ dc842834-1376-40c2-86f5-174482d655e3
+function loss_3d_semi(x)
+  	return -elbo_3d_semi(x)
+end
 
 # ╔═╡ bb620ae9-7a38-4c39-8026-fb3a9ffb768e
 function train_semi!(enc, dec, data; nepochs=100)
@@ -693,7 +645,7 @@ function train_semi!(enc, dec, data; nepochs=100)
 		b_loss = 0
 		for batch in data
 			grads = Flux.gradient(params) do
-				b_loss = loss_3d_cond(batch)
+				b_loss = loss_3d_semi(batch)
 				return b_loss
 			end
 			Flux.Optimise.update!(opt, params, grads)
@@ -704,48 +656,13 @@ function train_semi!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ beade4cf-6b98-48d5-ad02-8102360fa55a
-train_cond!(encoder_semi, decoder_semi, batches_semi, nepochs=3)
+train_semi!(encoder_semi, decoder_semi, batches_semi, nepochs=3)
 
-# ╔═╡ 024ea208-3ae1-43e8-8758-d049d0eff5d3
-begin
-	@save "encoder_semi.bson" encoder_semi
-	@save "decoder_semi.bson" decoder_semi
-end
+# ╔═╡ 6b7ce335-dca4-4e52-9f25-27d507bbf72b
+plots1_semi, plots_semi = visualize_samples(decoder_semi, 3)
 
-# ╔═╡ 1faa33a5-b679-442a-b983-16cab2b48ad9
-begin
-	BSON.load("encoder_semi.bson", @__MODULE__)
-	BSON.load("decoder_semi.bson", @__MODULE__)
-end
-
-# ╔═╡ 0fc0995f-f87a-4c13-b33a-ab01f86f3d1c
-begin
-	# 2. decode each z to get logit-means
-	plots1_semi = Any[]
-	plots_semi = Any[]
-	for i in 1:10
-		logit_means_semi = decoder_cond(zs_cond[i])
-		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean_semi = vec(calculate_bernoulli_mean(logit_means_semi))[1:784]
-		# bs = size(bern_mean_cond)
-		# @info "bern size: $bs"
-		push!(plots_semi, draw_image_cond(bern_mean_semi))
-		# 5. Sample 1 example from Bernoulli 
-		samples1_semi = rand(Float64, size(bern_mean_semi)) .< bern_mean_semi
-		push!(plots1_semi, draw_image_cond(samples1_semi))
-		
-	end
-end
-
-# ╔═╡ 3639bf58-809f-4221-8c91-8abbe218d0b4
-begin
-	# 6. Display all plots in a single 10 x 4 grid
-	p_semi = plot(layout = (10,1), size=(500,1200))
-	for i in 1:10
-		heatmap!(cat(plots_semi[i], plots1_semi[i],dims=2), subplot=i)
-	end
-	plot(p_semi)
-end
+# ╔═╡ 5d29b1bd-8189-4054-89b1-071cac4b4fd8
+plot_mnist_image(plots_semi, plots1_semi)
 
 # ╔═╡ 5bd4471f-d3c3-451d-94ee-05a30132e2b9
 md"""
@@ -753,20 +670,29 @@ md"""
 """
 
 # ╔═╡ 077026fc-808f-46ef-8308-d32f50b0e12f
-function create_enc_dec()
-	encoder = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz*2), unpack_guassian_params)
-	decoder = Chain(Dense(Dz, Dh, tanh), Dense(Dh, Ddata))
-	return encoder, decoder
-end
+# function create_enc_dec()
+# 	encoder = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz*2), unpack_guassian_params)
+# 	decoder = Chain(Dense(Dz, Dh, tanh), Dense(Dh, Ddata))
+# 	return encoder, decoder
+# end
 
 # ╔═╡ 1ebf3383-03c8-434d-8f09-9621344c686b
-enc1, dec1 = create_enc_dec()
+encoder_js, decoder_js = create_enc_dec(2, unpack_guassian_params)
+
+# ╔═╡ a25b0d00-af5a-4d80-8384-c77b57c26a0d
+function log_likelihood_js(x,z)
+  """ Compute log likelihood log_p(x|z)"""
+	return sum(bernoulli_log_density(x, decoder_js(z)),dims=1)
+end
+
+# ╔═╡ 390781e2-575a-4c33-9e9d-439c6d06d60d
+joint_log_density_js(x,z) = log_prior(z) .+ log_likelihood_js(x,z)
 
 # ╔═╡ 2bd2d7da-5798-4104-89cf-a81f4d553be5
 function elbo_js(x)	
-	q_μ, q_logσ = enc1(x)
+	q_μ, q_logσ = encoder_js(x)
   	z = sample_from_var_dist(q_μ, q_logσ)
-  	joint_ll = joint_log_density(x,z)
+  	joint_ll = joint_log_density_js(x,z)
   	log_q_z = log_q(z, q_μ, q_logσ)
 	p = exp.(joint_ll)
 	q = exp.(log_q_z)
@@ -809,54 +735,13 @@ function train_js!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ 53eeb659-3083-45ea-a001-23e16c29388a
-train_js!(enc1, dec1, batches, nepochs=1)
-
-# ╔═╡ 48d0afee-667b-4b9f-8610-2abb5973ef86
-# begin
-# 	@save "encoder_js.bson" encoder_js
-# 	@save "decoder_js.bson" decoder_js
-# end
-
-# ╔═╡ 8b190d6d-ed7e-4e19-9228-6ec3a8d6934e
-# begin
-# 	BSON.load("encoder_js.bson", @__MODULE__)
-# 	BSON.load("decoder_js.bson", @__MODULE__)
-# end
-
-# ╔═╡ 52a9a59f-1e3a-484f-87bd-22dbdc0d704b
-function visualize_samples(decoder)
-	plots1 = Any[]
-	plots = Any[]
-	for i in 1:10
-		# 1. Sample 10 3D z from the prior p(z)
-		z = randn(2,)
-		# 2. decode each z to get logit-means
-		logit_means = decoder(z)
-		# 3. Transfer logit-means to Bernoulli means μ
-		bern_mean = calculate_bernoulli_mean(logit_means)
-		push!(plots, draw_image(bern_mean))
-		# 5. Sample 1 example from Bernoulli 
-		samples1 = rand(Float64, size(bern_mean)) .< bern_mean
-		push!(plots1, draw_image(samples1))
-	end
-	return plots1, plots
-end
+train_js!(encoder_js, decoder_js, batches, nepochs=3)
 
 # ╔═╡ d25834fb-b564-4a54-aacb-0bac51b45e70
-plots1_1, plots_1 = visualize_samples(dec1)
-
-# ╔═╡ aab34582-8cbb-4ff2-ab1b-d660755acbec
-function plot_mnist_image(plots, plots1)
-	# 6. Display all plots in a single 10 x 4 grid
-	p = plot(layout = (10,1), size=(500,1200))
-	for i in 1:10
-		heatmap!(cat(plots[i], plots1[i],dims=2), subplot=i)
-	end
-	plot(p)
-end
+plots1_js, plots_js = visualize_samples(decoder_js, 2)
 
 # ╔═╡ 30772ff5-c234-4e4b-8906-e89719be6435
-# plot_mnist_image(plots_1, plots1_1)
+plot_mnist_image(plots_js, plots1_js)
 
 # ╔═╡ 888a7310-82fe-40af-b4fd-92577fa46e4d
 md"""
@@ -875,7 +760,7 @@ function beta_log_density(x, logit_means, α, β)
 end
 
 # ╔═╡ 072c7766-f386-417d-94f6-cb135e7c1dc1
-encoder_beta, decoder_beta = create_enc_dec()
+encoder_beta, decoder_beta = create_enc_dec(2, unpack_guassian_params)
 
 # ╔═╡ 538d688e-3ee0-43a3-bfb1-bd469c065d8d
 function log_likelihood_beta(x, z, α, β)
@@ -892,7 +777,7 @@ function elbo_beta(x)
   	z = sample_from_var_dist(q_μ, q_logσ)
   	joint_ll = joint_log_density_beta(x,z, 2, 2)
   	log_q_z = log_q(z, q_μ, q_logσ)
-  	elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+  	elbo_estimate = mean(joint_ll - log_q_z)
   	return elbo_estimate
 end
 
@@ -926,13 +811,150 @@ end
 float_batches = Flux.Data.DataLoader(float_MNIST, batchsize=BS)
 
 # ╔═╡ 1bfe2a17-5f4a-45a0-bae5-32fd61f1ccf1
-train_beta!(encoder_beta, decoder_beta, float_batches, nepochs=3)
+train_beta!(encoder_beta, decoder_beta, float_batches, nepochs=5)
 
 # ╔═╡ c8f3397e-fdf2-4334-98c9-96ea390aa099
-plots1_beta, plots_beta = visualize_samples(decoder_beta)
+plots1_beta, plots_beta = visualize_samples(decoder_beta, 2)
 
 # ╔═╡ 405ce3bc-124d-4815-8732-c967a01f1d66
 plot_mnist_image(plots_beta, plots1_beta)
+
+# ╔═╡ 90677b4f-d4eb-46c6-af37-9abd26b3a925
+md"""
+### Inference
+Use the baseline model to infer the bottom of a digit given the top
+"""
+
+# ╔═╡ 6d6b50a5-5ee5-4694-8470-f4cc6838c0e9
+Dhalf = Int(28*28/2)
+
+# ╔═╡ 6efb46a3-2d03-4f61-b85d-f2f34d0a04f3
+# Helper function for drawing only top half of the MNIST digit in 28*28 shape
+function draw_top_half_image(x)
+	x = reshape(x, 28, 28, :)
+	bot_x = x[1:14,:,:]
+	return reshape(bot_x, (14,28))
+end
+
+# ╔═╡ 8357164e-e220-4911-bdbb-442586fb83ec
+# Helper function for drawing only top half of the MNIST digit in 28*28 shape
+function draw_bot_half_image(x)
+	x = reshape(x, 28, 28, :)
+	bot_x = x[15:28,:,:]
+	return reshape(bot_x, (14,28))
+end
+
+# ╔═╡ 5a4c50e1-c849-4d54-95d8-3d5c3e27f439
+# Calculate log likelihood log_p(top|z)
+function log_p_top_z(top, z)
+	x̂_half = decoder(z)[1:Dhalf,:]
+	return sum(bernoulli_log_density(top,x̂_half),dims=1)
+end
+
+# ╔═╡ 60b5c2ea-5d6d-4e64-839c-ce5e7a83cf27
+md"""
+Log joint density $p(z,top)$
+"""
+
+# ╔═╡ 3f8b673f-b9fb-435e-9832-321fd2539846
+# Calculate log_p(top, z)
+joint_log_density_top(top,z) = log_prior(z) .+ log_p_top_z(top,z)
+
+# ╔═╡ 393f1d41-99d5-4f25-8b9d-bfa8b57ec65d
+md"""
+Stochastic variational inference $p(z|top)$
+"""
+
+# ╔═╡ 925453b6-8d02-491a-865e-cd464784ca15
+q_μ_top = randn(Dz,1)
+
+# ╔═╡ fd71a120-e07f-4430-bc9b-3001eea4d0c8
+q_logσ_top = randn(Dz,1)
+
+# ╔═╡ a01ebb83-355d-46a7-b6ea-5cbea7485b62
+function elbo_top(top, q_μ_top, q_logσ_top)
+  	z = sample_from_var_dist(q_μ_top, q_logσ_top)
+  	joint_ll = joint_log_density_top(top,z)
+  	log_q_z = log_q(z, q_μ_top, q_logσ_top)
+  	elbo_estimate = mean(joint_ll - log_q_z)
+  	return -elbo_estimate
+end
+
+# ╔═╡ 815aded7-fc7d-4c41-91a9-3251ec5cf3f4
+function loss_top(top, q_μ_top, q_logσ_top)
+  	return -elbo_top(top, q_μ_top, q_logσ_top)
+end
+
+# ╔═╡ f5bc9db5-deb8-476f-9439-ef03b3707dd3
+n = size(train_labels)[1]
+
+# ╔═╡ b6e0fdd6-65bd-4259-906e-e57a6e928437
+# Construct a dataset consists of digit 0
+indices_0 = [i for i in 1:n if train_labels[i]==0]
+
+# ╔═╡ 85202977-9f9d-4c4e-b36f-6e86fa12c66e
+digit_0 = binarized_MNIST[:,indices_0]
+
+# ╔═╡ d500888b-2718-4df3-9ba2-5886f70f993b
+function train_top!(q_μ, q_logσ, data, loss_func; nepochs=100)
+	params = Flux.params(q_μ, q_logσ)
+	opt = ADAM()
+	@info "Begin training to optimize q_μ and q_logσ"
+	for epoch in 1:nepochs
+		b_loss = 0
+		grads = Flux.gradient(params) do
+			b_loss = loss_func(data[1:Dhalf])
+			return b_loss
+		end
+		Flux.Optimise.update!(opt, params, grads)
+		@info "Epoch $epoch: loss:$b_loss"
+	end
+	@info "Optimizing q_μ and q_logσ is done"
+end
+
+# ╔═╡ 4a2639c0-5b41-4d8f-8dc3-9eee168939a0
+loss_tophalf(top) = loss_top(top, q_μ_top, q_logσ_top)	
+
+# ╔═╡ 1659084a-15e8-4681-98d3-e5febba12364
+size(digit_0)
+
+# ╔═╡ 27b64959-d018-414d-9f43-5b729a1172d0
+md"""
+Take digit $0$ and infer the bottom part given the top part
+"""
+
+# ╔═╡ feb10319-00b1-4acb-acd1-6abf78ecd6e3
+test_img = train_digits[2]
+
+# ╔═╡ 3768d31d-dadc-4be8-afc3-2b16ea4cc167
+train_top!(q_μ_top, q_logσ_top, digit_0[:,2], loss_tophalf, nepochs=2)
+
+# ╔═╡ 53a5b0df-9cc8-4164-84b0-a73498708c69
+begin
+	p_top = plot(layout = (1,2))
+	
+	# Take a sample z from the approximate posterior
+	z_top = sample_from_var_dist(q_μ_top, q_logσ_top)
+	# Feed z to decoder
+	logits_mean_top = decoder(z_top)
+	# Convert to bernoulli mean
+	bern_mean_top = calculate_bernoulli_mean(logits_mean_top)
+	bot_part = draw_bot_half_image(bern_mean_top)
+	top_part = draw_top_half_image(test_img)
+	cat_img = cat(top_part, bot_part, dims=1)
+	
+	# Plot original and inferred results
+	plot!(test_img, title="Original digit 0", subplot=1)
+	plot!(draw_image(vec(cat_img)), title= "Inferred digit 0", subplot=2)
+	
+	plot(p_top)
+end
+
+# ╔═╡ 986442a3-c767-4067-b9a5-30c010d5b4fc
+md"""
+### More interesting data
+Train the VAE model on Fashion MNIST dataset
+"""
 
 # ╔═╡ Cell order:
 # ╠═d402633e-8c18-11eb-119d-017ad87927b0
@@ -972,11 +994,11 @@ plot_mnist_image(plots_beta, plots1_beta)
 # ╠═5344b278-82b1-4a14-bf9e-350685c6d57e
 # ╠═2029fc15-3ed9-4f99-b585-c93fdcdc66fb
 # ╟─de41eda0-2636-4f87-b791-286a84f744ff
+# ╠═a47cc636-cbd1-4ec6-9084-9e44a436f3a8
 # ╠═0111f7f1-90c8-4ae7-ad75-68b155d4bd30
+# ╠═adc7cc1a-dd3d-48bc-8c34-7d30b684199d
 # ╠═7a86763d-fa11-48ac-94f0-7bd9874af9c5
 # ╠═3553b2af-d10b-4df5-b67a-ba3d252b7e0e
-# ╠═adc7cc1a-dd3d-48bc-8c34-7d30b684199d
-# ╠═65718db9-5ab1-46d0-9dfb-3b234c956e1f
 # ╠═28172ef1-06c6-4236-b027-b55c79ce94f1
 # ╠═fdd02429-60d1-4c65-bc0d-2ea121d1a712
 # ╠═119a6e70-d698-489e-9605-1757b8429f57
@@ -984,20 +1006,19 @@ plot_mnist_image(plots_beta, plots1_beta)
 # ╠═c6d56e0f-0284-4c74-b632-3ae1cd1cae6a
 # ╠═0a731566-69e6-409a-bb9e-9dc371dfb890
 # ╠═d6f3c660-c632-4795-8bb9-35e456bebac4
-# ╠═f5d2e08b-8975-4190-a033-e6630dea3ab9
-# ╠═adc743b0-4174-4fa5-9c11-b30817cc3768
 # ╠═b6a2b5d8-5258-4b75-8611-d25a4a075753
 # ╠═e2c07c18-43c8-4899-b083-05c8180dc7d3
 # ╠═78714227-094e-4a00-a72c-accfb50e1b71
 # ╟─5ca39a1b-4871-4f48-9934-99c88fb504ba
 # ╠═79015407-a145-44ed-853d-ca7c89676ddc
+# ╠═8e9b5bd6-5d29-4127-8256-c71f65f50536
+# ╠═012cda0a-b79e-44cc-a3c4-51c7d954de0e
 # ╟─b7ae23ec-1612-40b9-8020-21d5ee5f4c48
-# ╠═b10f4fa4-7fcb-4bc1-975a-55c8079a616a
-# ╠═e4b267fb-c2e9-4341-b261-860b12648127
+# ╠═af6b3831-1de5-47e4-afaf-c9cd4adb640f
 # ╟─670121db-0989-4939-86e6-888194affb41
-# ╠═92b6e763-522b-444e-9127-9ff51ef1239b
-# ╠═a08ff202-3e7f-413e-8801-91d609409753
-# ╠═9a5d4ff2-9ccb-4883-84fe-af3f3d52c568
+# ╠═a9623ea4-e2cc-424f-8725-4c67d801ce19
+# ╠═0a61fd36-b757-4852-818a-a5e65d3f312f
+# ╠═62d47455-4d48-480a-ad34-0b9cb37be6cb
 # ╟─2a3caf33-8f54-42a0-ad52-a1fae4863a6a
 # ╠═7edbeb65-ed32-4cab-ab20-37e65c820334
 # ╠═4759682f-9239-42c9-9a30-d70dc3939285
@@ -1009,10 +1030,8 @@ plot_mnist_image(plots_beta, plots1_beta)
 # ╟─8f446c4a-6df9-45d1-806a-3433a039229d
 # ╟─f0f3347b-a89f-4ed3-94b6-1be2482fe954
 # ╟─1b1bd03a-09a7-49f9-96e7-45aaa35ef8f4
-# ╠═5a62989d-6b26-4209-a7c2-fde82d5a87b2
 # ╟─772f74d7-097b-40e6-a8c9-ee536dcffadc
 # ╠═2c8ae3f0-9e01-40b3-9cb0-0d651a048662
-# ╠═5926c5c0-c552-4802-8447-58e526e00659
 # ╟─f19287fa-1ed4-4994-b59a-2731f8accec0
 # ╠═a6d94aa9-e4af-4dd1-a31b-b07e53a11e17
 # ╠═89af27db-3cc4-424d-9741-473e863a95e4
@@ -1028,33 +1047,31 @@ plot_mnist_image(plots_beta, plots1_beta)
 # ╠═0695dd02-e617-4110-9f5e-234f5cfcad31
 # ╟─395bec09-3908-4095-afdb-ade87f6b6078
 # ╠═1ad7f796-e1f4-4bba-8e38-3f1ba5628474
-# ╠═bc46e68f-ea1d-4f3a-b044-38bd7107bd6d
 # ╠═6189ad86-5539-4ebd-9413-ad3592b24d24
-# ╠═5902256e-c3e6-4194-b141-eb83e7171206
-# ╠═54c2cccd-2f3d-4bc0-a7eb-4f00367ad619
+# ╠═3b9c1ed3-c083-484e-89b7-253923da794e
+# ╠═a34bc0c1-ca8c-4535-86bb-64c1ea10d1e9
 # ╟─f50eeab6-7cda-4593-9f3b-6ac6dc258ba6
 # ╠═5836cc48-dc6b-4768-bcb4-b7a5693e3deb
 # ╠═97bff68e-54af-4b4f-8d0f-5fcda48be845
 # ╠═f248ae66-6a8f-47d8-808a-8b5b3efaf795
-# ╠═d93b609a-4a5b-4c5f-af43-801083d8b67f
+# ╠═cc7274c4-1591-4b3d-a727-173243240adf
+# ╠═dea35b3d-a22f-4765-a750-26baea97b630
+# ╠═bbe80124-1a79-443f-baf0-4a97ffab3693
+# ╠═dc842834-1376-40c2-86f5-174482d655e3
 # ╠═bb620ae9-7a38-4c39-8026-fb3a9ffb768e
 # ╠═beade4cf-6b98-48d5-ad02-8102360fa55a
-# ╠═024ea208-3ae1-43e8-8758-d049d0eff5d3
-# ╠═1faa33a5-b679-442a-b983-16cab2b48ad9
-# ╠═0fc0995f-f87a-4c13-b33a-ab01f86f3d1c
-# ╠═3639bf58-809f-4221-8c91-8abbe218d0b4
+# ╠═6b7ce335-dca4-4e52-9f25-27d507bbf72b
+# ╠═5d29b1bd-8189-4054-89b1-071cac4b4fd8
 # ╟─5bd4471f-d3c3-451d-94ee-05a30132e2b9
 # ╠═077026fc-808f-46ef-8308-d32f50b0e12f
 # ╠═1ebf3383-03c8-434d-8f09-9621344c686b
+# ╠═a25b0d00-af5a-4d80-8384-c77b57c26a0d
+# ╠═390781e2-575a-4c33-9e9d-439c6d06d60d
 # ╠═2bd2d7da-5798-4104-89cf-a81f4d553be5
 # ╠═0d27ad7a-d3a2-4873-bf5f-f6585fc63882
 # ╠═1c1dd8a7-697e-45e2-9734-f221b2e46978
 # ╠═53eeb659-3083-45ea-a001-23e16c29388a
-# ╠═48d0afee-667b-4b9f-8610-2abb5973ef86
-# ╠═8b190d6d-ed7e-4e19-9228-6ec3a8d6934e
-# ╠═52a9a59f-1e3a-484f-87bd-22dbdc0d704b
 # ╠═d25834fb-b564-4a54-aacb-0bac51b45e70
-# ╠═aab34582-8cbb-4ff2-ab1b-d660755acbec
 # ╠═30772ff5-c234-4e4b-8906-e89719be6435
 # ╟─888a7310-82fe-40af-b4fd-92577fa46e4d
 # ╠═63b0f25f-076c-4b0f-b09b-5ecd9d317e13
@@ -1071,3 +1088,26 @@ plot_mnist_image(plots_beta, plots1_beta)
 # ╠═1bfe2a17-5f4a-45a0-bae5-32fd61f1ccf1
 # ╠═c8f3397e-fdf2-4334-98c9-96ea390aa099
 # ╠═405ce3bc-124d-4815-8732-c967a01f1d66
+# ╟─90677b4f-d4eb-46c6-af37-9abd26b3a925
+# ╠═6d6b50a5-5ee5-4694-8470-f4cc6838c0e9
+# ╠═6efb46a3-2d03-4f61-b85d-f2f34d0a04f3
+# ╠═8357164e-e220-4911-bdbb-442586fb83ec
+# ╠═5a4c50e1-c849-4d54-95d8-3d5c3e27f439
+# ╟─60b5c2ea-5d6d-4e64-839c-ce5e7a83cf27
+# ╠═3f8b673f-b9fb-435e-9832-321fd2539846
+# ╟─393f1d41-99d5-4f25-8b9d-bfa8b57ec65d
+# ╠═925453b6-8d02-491a-865e-cd464784ca15
+# ╠═fd71a120-e07f-4430-bc9b-3001eea4d0c8
+# ╠═a01ebb83-355d-46a7-b6ea-5cbea7485b62
+# ╠═815aded7-fc7d-4c41-91a9-3251ec5cf3f4
+# ╠═f5bc9db5-deb8-476f-9439-ef03b3707dd3
+# ╠═b6e0fdd6-65bd-4259-906e-e57a6e928437
+# ╠═85202977-9f9d-4c4e-b36f-6e86fa12c66e
+# ╠═d500888b-2718-4df3-9ba2-5886f70f993b
+# ╠═4a2639c0-5b41-4d8f-8dc3-9eee168939a0
+# ╠═1659084a-15e8-4681-98d3-e5febba12364
+# ╟─27b64959-d018-414d-9f43-5b729a1172d0
+# ╠═feb10319-00b1-4acb-acd1-6abf78ecd6e3
+# ╠═3768d31d-dadc-4be8-afc3-2b16ea4cc167
+# ╠═53a5b0df-9cc8-4164-84b0-a73498708c69
+# ╟─986442a3-c767-4067-b9a5-30c010d5b4fc
