@@ -669,13 +669,6 @@ md"""
 ### Optimizing Different Divergences
 """
 
-# ╔═╡ 077026fc-808f-46ef-8308-d32f50b0e12f
-# function create_enc_dec()
-# 	encoder = Chain(Dense(Ddata, Dh, tanh), Dense(Dh, Dz*2), unpack_guassian_params)
-# 	decoder = Chain(Dense(Dz, Dh, tanh), Dense(Dh, Ddata))
-# 	return encoder, decoder
-# end
-
 # ╔═╡ 1ebf3383-03c8-434d-8f09-9621344c686b
 encoder_js, decoder_js = create_enc_dec(2, unpack_guassian_params)
 
@@ -956,6 +949,72 @@ md"""
 Train the VAE model on Fashion MNIST dataset
 """
 
+# ╔═╡ 172202fa-bd2a-47c5-a278-108d21cb742a
+train_fashion = Flux.Data.FashionMNIST.images(:train)
+
+# ╔═╡ a4fb2a32-87e2-4068-a10f-85f38405000b
+greyscale_fashion = hcat(float.(reshape.(train_fashion,:))...)
+
+# ╔═╡ 435ac5c8-f763-4d87-a06d-d28183f9c2ab
+binarized_fashion = greyscale_fashion .> 0.5
+
+# ╔═╡ 410be0e5-99ea-4cbf-a24c-1a9d8118ff6d
+fashion_batches = Flux.Data.DataLoader(binarized_fashion, batchsize=BS)
+
+# ╔═╡ 5616d1c2-9fdd-4d17-94bb-a3afa38e3cc0
+encoder_fashion, decoder_fashion = create_enc_dec(Dz_3d, unpack_guassian_params_3d)
+
+# ╔═╡ 71b32858-4c7d-4864-a839-eee9cc11eabe
+function log_likelihood_fashion(x,z)
+	return sum(bernoulli_log_density(x, decoder_fashion(z)),dims=1)
+end
+
+# ╔═╡ 222c76dd-b44c-448c-99fc-402ccdb739ad
+joint_log_density_fashion(x,z) = log_prior(z) .+ log_likelihood_fashion(x,z)
+
+# ╔═╡ 266c0e2e-f46c-43ef-8e6c-641eaf57c5b2
+function elbo_fashion(x)
+	q_μ, q_logσ = encoder_fashion(x)
+  	z = sample_from_var_dist_3d(q_μ, q_logσ)
+  	joint_ll = joint_log_density_fashion(x,z)
+  	log_q_z = log_q(z, q_μ, q_logσ)
+  	elbo_estimate = mean(joint_ll - log_q_z)
+	return elbo_estimate
+end
+
+# ╔═╡ 1595c464-7d09-436a-809e-bb2c13faecb8
+function loss_fashion(x)
+  	return -elbo_fashion(x)
+end
+
+# ╔═╡ 88fcf777-dd27-4333-bf2c-94ed06eac788
+function train_fashion!(enc, dec, data; nepochs=100)
+	params = Flux.params(enc, dec)
+	opt = ADAM()
+	@info "Begin training on FashionMNIST in 3D latent space"
+	for epoch in 1:nepochs
+		b_loss = 0
+		for batch in data
+			grads = Flux.gradient(params) do
+				b_loss = loss_fashion(batch)
+				return b_loss
+			end
+			Flux.Optimise.update!(opt, params, grads)
+		end
+		@info "Epoch $epoch: loss:$b_loss"
+	end
+	@info "Training on FashionMNIST in 3D latent space is done"
+end
+
+# ╔═╡ 7ec721d8-a1ff-4598-804f-c5380df78361
+train_fashion!(encoder_fashion, decoder_fashion, fashion_batches, nepochs=5)
+
+# ╔═╡ 3ea00da5-e845-4f0f-912f-5a4d7d6f1ebf
+plots1_fashion, plots_fashion = visualize_samples(decoder_fashion, 3)
+
+# ╔═╡ fd1e8ee6-9edb-4990-b496-37289dd6785d
+plot_mnist_image(plots_fashion, plots1_fashion)
+
 # ╔═╡ Cell order:
 # ╠═d402633e-8c18-11eb-119d-017ad87927b0
 # ╠═54749c92-8c1d-11eb-2a54-a1ae0b1dc587
@@ -1063,7 +1122,6 @@ Train the VAE model on Fashion MNIST dataset
 # ╠═6b7ce335-dca4-4e52-9f25-27d507bbf72b
 # ╠═5d29b1bd-8189-4054-89b1-071cac4b4fd8
 # ╟─5bd4471f-d3c3-451d-94ee-05a30132e2b9
-# ╠═077026fc-808f-46ef-8308-d32f50b0e12f
 # ╠═1ebf3383-03c8-434d-8f09-9621344c686b
 # ╠═a25b0d00-af5a-4d80-8384-c77b57c26a0d
 # ╠═390781e2-575a-4c33-9e9d-439c6d06d60d
@@ -1111,3 +1169,16 @@ Train the VAE model on Fashion MNIST dataset
 # ╠═3768d31d-dadc-4be8-afc3-2b16ea4cc167
 # ╠═53a5b0df-9cc8-4164-84b0-a73498708c69
 # ╟─986442a3-c767-4067-b9a5-30c010d5b4fc
+# ╠═172202fa-bd2a-47c5-a278-108d21cb742a
+# ╠═a4fb2a32-87e2-4068-a10f-85f38405000b
+# ╠═435ac5c8-f763-4d87-a06d-d28183f9c2ab
+# ╠═410be0e5-99ea-4cbf-a24c-1a9d8118ff6d
+# ╠═5616d1c2-9fdd-4d17-94bb-a3afa38e3cc0
+# ╠═71b32858-4c7d-4864-a839-eee9cc11eabe
+# ╠═222c76dd-b44c-448c-99fc-402ccdb739ad
+# ╠═266c0e2e-f46c-43ef-8e6c-641eaf57c5b2
+# ╠═1595c464-7d09-436a-809e-bb2c13faecb8
+# ╠═88fcf777-dd27-4333-bf2c-94ed06eac788
+# ╠═7ec721d8-a1ff-4598-804f-c5380df78361
+# ╠═3ea00da5-e845-4f0f-912f-5a4d7d6f1ebf
+# ╠═fd1e8ee6-9edb-4990-b496-37289dd6785d
