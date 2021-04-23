@@ -91,16 +91,22 @@ end
 function train_iwae!(enc, dec, data; nepochs=100, k=5)
 	params = Flux.params(enc, dec)
 	opt = ADAM()
-	@info "Begin training in 2D latent space k = $k"
+	@info "Begin training with k = $k"
 	for epoch in 1:nepochs
-		b_loss = 0
+		b_loss = 1000
 		for batch in data
-			gs = Flux.gradient(()->iwae_loss(batch, k), params) # compute gradient wrt loss
-			Flux.Optimise.update!(opt,params,gs) # update parameters
-			@info "Epoch $epoch: $(iwae_loss(batch, k))"
+			grads = Flux.gradient(params) do
+				loss = iwae_loss(batch, k)
+				if b_loss > loss
+					b_loss = loss
+				end
+				return loss
+			end
+			Flux.Optimise.update!(opt,params,grads) # update parameters
 		end
+		@info "Epoch $epoch: loss:$b_loss"
 	end
-	@info "Training in 2D is done"
+	@info "Training is done"
 end
 
 
@@ -112,12 +118,6 @@ train_iwae!(encoder_iwae, decoder_iwae, batches, nepochs=5)
 
 # k = 10
 train_iwae!(encoder_iwae, decoder_iwae, batches, nepochs=5, k=10)
-
-# k = 50
-train_iwae!(encoder_iwae, decoder_iwae, batches, nepochs=5, k=50)
-
-# k = 100
-train_iwae!(encoder_iwae, decoder_iwae, batches, nepochs=5, k=100)
 
 
 
@@ -147,7 +147,7 @@ end
 
 begin
 	# Random 4 digits in the first batch
-	digits_index = [3,7,8]
+	digits_index = [2, 9, 18]
 	
 	plots2 = []
 	for index in digits_index
@@ -164,7 +164,14 @@ begin
 	end
 
 	# plot the plots in a 4 x 5 grid
-	plot(plots2 ..., layout = (3, 3), size=(400, 400))
+	plot(plots2 ..., layout = (3, 3), size=(300, 400))
 end
 
-savefig("IWAE_visualization_k=50.png")
+begin
+	# get the train labels for the first batch
+	train_labels = Flux.Data.MNIST.labels(:train)[1:BS]
+	μ, logσ = encoder_iwae(first(batches))
+	scatter(μ[1,:], μ[2,:], group=train_labels, xlabel="latent 1", ylabel="latent 2", title="mean vectors wrt digit labels")
+end
+
+savefig("IWAE_visualization_k=10.png")
