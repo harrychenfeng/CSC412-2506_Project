@@ -218,7 +218,7 @@ function train!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ c86a877c-90b9-11eb-31d8-bbcb71e4fa66
-train!(encoder, decoder, batches, nepochs=3)
+train!(encoder, decoder, batches, nepochs=5)
 
 # ╔═╡ beec9c0c-d5cb-41fa-a5b6-7ba5da4afb68
 begin
@@ -341,7 +341,7 @@ function train_3d!(enc, dec, data; nepochs=100)
 end
 
 # ╔═╡ d6f3c660-c632-4795-8bb9-35e456bebac4
-train_3d!(encoder_3d, decoder_3d, batches, nepochs=3)
+train_3d!(encoder_3d, decoder_3d, batches, nepochs=5)
 
 # ╔═╡ b6a2b5d8-5258-4b75-8611-d25a4a075753
 q_μ_3d, q_logσ_3d = encoder_3d(first(batches))
@@ -468,12 +468,6 @@ md"""
 As the dimension of latent space increases, the variance along each dimension tends to increase.
 """
 
-# ╔═╡ f0f3347b-a89f-4ed3-94b6-1be2482fe954
-md"""
-###### Variance respond as the dimensionality of latent space increases
-TODO: Plot variance for 2D latent space v.s. 3D latent space during training
-"""
-
 # ╔═╡ 1b1bd03a-09a7-49f9-96e7-45aaa35ef8f4
 md"""
 ### Condition on MNIST Digit Supervision
@@ -484,10 +478,10 @@ md"""
 Horizontally concate labels to data
 """
 
-# ╔═╡ 2c8ae3f0-9e01-40b3-9cb0-0d651a048662
+# ╔═╡ 74dfa0d5-9ca0-42c6-98ab-2be46e933b97
 begin
-	encoder_cond = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
-	decoder_cond = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+	encoder_cond = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, (Dz_3d+10)*2), unpack_guassian_params_3d)
+	decoder_cond = Chain(Dense(Dz_3d+10, Dh, tanh), Dense(Dh, Ddata+10))
 end
 
 # ╔═╡ f19287fa-1ed4-4994-b59a-2731f8accec0
@@ -503,9 +497,13 @@ batches_cond = Flux.Data.DataLoader(cat(binarized_MNIST, onehot_labels, dims=1),
 
 # ╔═╡ 2191de84-b685-4b25-816e-f38a6e12db3d
 function log_likelihood_cond(x,z)
-  """ Compute log likelihood log_p(x|z)"""
-	# use numerically stable bernoulli
-	return sum(bernoulli_log_density(x, decoder_cond(z)),dims=1)
+  """ Compute log likelihood log_p(x|z,c)"""
+	# Let's just label all samples to be digit 0
+	digit_0_zeroes = zeros((9,200))
+	digit_0_ones = ones((1,200))
+	digit_0 = cat(digit_0_ones, digit_0_zeroes, dims=1)
+	cond_z = cat(z, digit_0, dims=1)
+	return sum(bernoulli_log_density(x, decoder_cond(cond_z)),dims=1)
 end
 
 # ╔═╡ 85186d7a-2f4b-4766-8bcf-8edb415af4f8
@@ -548,18 +546,6 @@ end
 # ╔═╡ 780d91c4-c606-48d5-bda6-7512f4ab2d82
 train_cond!(encoder_cond, decoder_cond, batches_cond, nepochs=3)
 
-# ╔═╡ d41c401c-3ac9-47fa-8f88-c6e81f5d092d
-begin
-	@save "encoder_3d_labels.bson" encoder_cond 
-	@save "decoder_3d_labels.bson" decoder_cond
-end
-
-# ╔═╡ c2ef34f8-2ff9-4731-aed3-0262d4c0b733
-begin
-	BSON.load("encoder_3d_labels.bson", @__MODULE__)
-	BSON.load("decoder_3d_labels.bson", @__MODULE__)
-end
-
 # ╔═╡ 0695dd02-e617-4110-9f5e-234f5cfcad31
 q_μ_cond, q_logσ_cond = encoder_cond(first(batches_cond))
 
@@ -585,7 +571,7 @@ function draw_image_cond(x)
 end
 
 # ╔═╡ 3b9c1ed3-c083-484e-89b7-253923da794e
-plots1_cond, plots_cond = visualize_samples(decoder_cond, 3)
+plots1_cond, plots_cond = visualize_samples(decoder_cond, 13)
 
 # ╔═╡ a34bc0c1-ca8c-4535-86bb-64c1ea10d1e9
 plot_mnist_image(plots_cond, plots1_cond)
@@ -607,15 +593,19 @@ batches_semi = Flux.Data.DataLoader(cat(binarized_MNIST, onehot_semi, dims=1), b
 
 # ╔═╡ f248ae66-6a8f-47d8-808a-8b5b3efaf795
 begin
-	encoder_semi = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, Dz_3d*2), unpack_guassian_params_3d)
-	decoder_semi = Chain(Dense(Dz_3d, Dh, tanh), Dense(Dh, Ddata+10))
+	encoder_semi = Chain(Dense(Ddata+10, Dh, tanh), Dense(Dh, (Dz_3d+10)*2), unpack_guassian_params_3d)
+	decoder_semi = Chain(Dense(Dz_3d+10, Dh, tanh), Dense(Dh, Ddata+10))
 end
 
-# ╔═╡ cc7274c4-1591-4b3d-a727-173243240adf
+# ╔═╡ 09b2a74f-2412-46f4-8d03-8ab2721e6532
 function log_likelihood_semi(x,z)
-  """ Compute log likelihood log_p(x|z)"""
-	# use numerically stable bernoulli
-	return sum(bernoulli_log_density(x, decoder_semi(z)),dims=1)
+  """ Compute log likelihood log_p(x|z,c)"""
+	# Let's just label all samples to be digit 0
+	digit_0_zeroes = zeros((9,200))
+	digit_0_ones = ones((1,200))
+	digit_0 = cat(digit_0_ones, digit_0_zeroes, dims=1)
+	cond_z = cat(z, digit_0, dims=1)
+	return sum(bernoulli_log_density(x, decoder_semi(cond_z)),dims=1)
 end
 
 # ╔═╡ dea35b3d-a22f-4765-a750-26baea97b630
@@ -659,7 +649,7 @@ end
 train_semi!(encoder_semi, decoder_semi, batches_semi, nepochs=3)
 
 # ╔═╡ 6b7ce335-dca4-4e52-9f25-27d507bbf72b
-plots1_semi, plots_semi = visualize_samples(decoder_semi, 3)
+plots1_semi, plots_semi = visualize_samples(decoder_semi, 13)
 
 # ╔═╡ 5d29b1bd-8189-4054-89b1-071cac4b4fd8
 plot_mnist_image(plots_semi, plots1_semi)
@@ -687,16 +677,14 @@ function elbo_js(x)
   	z = sample_from_var_dist(q_μ, q_logσ)
   	joint_ll = joint_log_density_js(x,z)
   	log_q_z = log_q(z, q_μ, q_logσ)
+	
 	p = exp.(joint_ll)
 	q = exp.(log_q_z)
-	# kl(p,q) = sum(p .* log.(p ./ q))
 	m = 0.5*log.(p+q)
-	# pm = kl(p,m)
-	# qm = kl(q,m)
+	
 	pm = sum(joint_ll - m)/size(x)[2]
 	qm = sum(log_q_z - m)/size(x)[2]
-	# elbo_estimate = sum(p .* log.(p ./ q)- p + q)/size(x)[2]
-  	# elbo_estimate = sum(joint_ll - log_q_z)/size(x)[2]
+	
 	elbo_estimate = 0.5*pm + 0.5*qm
   	return elbo_estimate
 end
@@ -1087,10 +1075,9 @@ plot_mnist_image(plots_fashion, plots1_fashion)
 # ╠═9054f4f9-6a31-404a-bc7e-6be1480e00c6
 # ╠═37d20d35-72b9-496e-9dd0-a81a3d5c69cd
 # ╟─8f446c4a-6df9-45d1-806a-3433a039229d
-# ╟─f0f3347b-a89f-4ed3-94b6-1be2482fe954
 # ╟─1b1bd03a-09a7-49f9-96e7-45aaa35ef8f4
 # ╟─772f74d7-097b-40e6-a8c9-ee536dcffadc
-# ╠═2c8ae3f0-9e01-40b3-9cb0-0d651a048662
+# ╠═74dfa0d5-9ca0-42c6-98ab-2be46e933b97
 # ╟─f19287fa-1ed4-4994-b59a-2731f8accec0
 # ╠═a6d94aa9-e4af-4dd1-a31b-b07e53a11e17
 # ╠═89af27db-3cc4-424d-9741-473e863a95e4
@@ -1101,8 +1088,6 @@ plot_mnist_image(plots_fashion, plots1_fashion)
 # ╠═2baf4e94-8651-494b-8c76-b05fdba16c99
 # ╠═f7e9c8c1-7939-4551-9267-28e58bb63191
 # ╠═780d91c4-c606-48d5-bda6-7512f4ab2d82
-# ╠═d41c401c-3ac9-47fa-8f88-c6e81f5d092d
-# ╠═c2ef34f8-2ff9-4731-aed3-0262d4c0b733
 # ╠═0695dd02-e617-4110-9f5e-234f5cfcad31
 # ╟─395bec09-3908-4095-afdb-ade87f6b6078
 # ╠═1ad7f796-e1f4-4bba-8e38-3f1ba5628474
@@ -1113,7 +1098,7 @@ plot_mnist_image(plots_fashion, plots1_fashion)
 # ╠═5836cc48-dc6b-4768-bcb4-b7a5693e3deb
 # ╠═97bff68e-54af-4b4f-8d0f-5fcda48be845
 # ╠═f248ae66-6a8f-47d8-808a-8b5b3efaf795
-# ╠═cc7274c4-1591-4b3d-a727-173243240adf
+# ╠═09b2a74f-2412-46f4-8d03-8ab2721e6532
 # ╠═dea35b3d-a22f-4765-a750-26baea97b630
 # ╠═bbe80124-1a79-443f-baf0-4a97ffab3693
 # ╠═dc842834-1376-40c2-86f5-174482d655e3
